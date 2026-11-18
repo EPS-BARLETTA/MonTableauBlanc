@@ -1,4 +1,4 @@
-const CACHE = 'mon-tableau-blanc-v7';
+const CACHE = 'mon-tableau-blanc-v8';
 const ASSETS = [
   './', './index.html', './manifest.webmanifest', './app.js', './app.css', './board.js', './board.css',
   './portraits.js', './ocr/client/tesseract.min.js', './ocr/client/worker.min.js',

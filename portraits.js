@@ -239,10 +239,10 @@ function validRosterPortrait(value) {
     return element;
   }
 
-  function importRoster({file, items, itemName, save}) {
+  function importRoster({file, items, itemName, save, className}) {
     const existing = items.length > 0;
     const candidates = items.map((item, index) => ({id: String(index), ...itemName(item.line)}));
-    const modal = dialog('Importer un trombinoscope');
+    const modal = dialog(className ? `Créer la classe ${className}` : 'Importer un trombinoscope');
     const progress = paragraph('Recherche des portraits…', 'help');
     progress.setAttribute('role', 'status');
     const list = document.createElement('div');
@@ -251,7 +251,8 @@ function validRosterPortrait(value) {
     footer.className = 'pf-roster-actions';
     const close = button('Fermer');
     close.onclick = () => modal.close();
-    const commit = button(existing ? 'Enregistrer les élèves et les portraits' : 'Créer la liste', 'ink');
+    const commitLabel = className ? 'Créer la classe' : existing ? 'Enregistrer les élèves et les portraits' : 'Enregistrer la liste';
+    const commit = button(commitLabel, 'ink');
     commit.disabled = true;
     footer.append(close, commit);
     modal.append(progress, list, footer);
@@ -314,9 +315,10 @@ function validRosterPortrait(value) {
       }
 
       function selections() {
+        const selected = rows.filter(x => x.row.isConnected && x.field.value.trim() && x.field.value !== '-');
+        if (!existing) return selected.filter(selectionKey);
         const counts = new Map();
         const registeredNames = new Set(currentItems.map(item => portraitNameKey(item.line)));
-        const selected = rows.filter(x => x.row.isConnected && x.field.value.trim() && x.field.value !== '-');
         for (const selection of selected) {
           const value = selectionKey(selection);
           counts.set(value, (counts.get(value) || 0) + 1);
@@ -331,6 +333,7 @@ function validRosterPortrait(value) {
       function update() {
         const ready = selections();
         const keep = new Set(ready);
+        const names = new Set(ready.map(selectionKey));
         let pending = 0;
         for (const entry of rows) {
           if (!entry.row.isConnected) continue;
@@ -343,22 +346,33 @@ function validRosterPortrait(value) {
         if (readIssue) parts.push('Lecture automatique incomplète');
         if (savedCount) parts.push(`${savedCount} enregistré(s)`);
         if (ready.length) parts.push(`${ready.length} prêt(s) à enregistrer`);
-        if (pending) parts.push(`${pending} à vérifier`);
+        if (pending) parts.push(existing ? `${pending} à vérifier` : `${pending} sans nom`);
+        if (!existing && names.size < ready.length) parts.push('Vérifie les noms répétés');
         progress.textContent = parts.join(' · ') || 'Aucun portrait à enregistrer.';
-        commit.disabled = !ready.length || (!existing && rows.some(x => x.field.value.trim() && !keep.has(x)));
+        commit.disabled = !ready.length;
       }
       list.addEventListener('input', update);
       if (existing) list.addEventListener('change', update);
       commit.onclick = () => {
         const ready = selections();
         if (!ready.length) return;
+        if (!existing) {
+          const warnings = [];
+          if (new Set(ready.map(selectionKey)).size < ready.length) {
+            warnings.push('Plusieurs portraits portent le même nom. Ils seront enregistrés comme des élèves distincts.');
+          }
+          const unnamed = rows.length - ready.length;
+          if (unnamed) warnings.push(`Portraits ignorés faute de nom · ${unnamed}.`);
+          if (warnings.length && !confirm(`${warnings.join('\n')}\n\nEnregistrer les ${ready.length} élèves renseignés ?`)) return;
+        }
         const next = existing ? currentItems.map(item => ({...item})) : [];
         for (const {field, newName, tile} of ready) {
           if (existing && field.value !== 'new') next[Number(field.value)].portrait = tile.photo;
           else next.push({line: (newName || field).value.trim().replace(/\s+/g, ' '), g: 0, portrait: tile.photo});
         }
-        if (!save(next)) {
-          progress.textContent = 'Impossible d’enregistrer les portraits sur cet appareil.';
+        let saveError = '';
+        if (!save(next, message => { saveError = message; })) {
+          progress.textContent = saveError || 'Impossible d’enregistrer les portraits sur cet appareil.';
           return;
         }
         currentItems = next;

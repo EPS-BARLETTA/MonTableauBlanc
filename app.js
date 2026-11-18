@@ -33,13 +33,15 @@ function notify(message) {
   noticeTimer = setTimeout(() => { notice.hidden = true; }, 3800);
 }
 
-function save() {
+function save(reportError = notify) {
   try {
     if (!canReadStorage) throw Error('Lecture du stockage impossible');
     localStorage.setItem(STORAGE_KEY, JSON.stringify(classes));
     return true;
-  } catch {
-    notify('Enregistrement impossible dans ce navigateur.');
+  } catch (error) {
+    reportError(error.name === 'QuotaExceededError'
+      ? 'Le stockage de ce navigateur est plein. Les modifications n’ont pas été enregistrées.'
+      : 'Enregistrement impossible dans ce navigateur.');
     return false;
   }
 }
@@ -231,12 +233,12 @@ function renderClassForm(group) {
     }));
   }
 
-  function saveRoster(students) {
+  function saveRoster(students, reportError) {
     const previous = classes;
     const updated = {...group, id: group?.id || uid(), name: name.value.trim(), students,
       boards: group?.boards || [{id: 'principal', name: 'Tableau principal'}]};
     classes = group ? classes.map(c => c.id === group.id ? updated : c) : [...classes, updated];
-    if (!save()) {
+    if (!save(reportError)) {
       classes = previous;
       return false;
     }
@@ -252,14 +254,15 @@ function renderClassForm(group) {
     if (!selected) return;
     RosterPortraits.importRoster({
       file: selected,
+      className: group ? '' : name.value.trim(),
       items: group?.students.map(student => ({...student, line: student.name})) || [],
       itemName: line => ({name: line}),
-      save(items) {
+      save(items, reportError) {
         const students = items.map(item => ({
           id: item.id || uid(), name: item.line,
           ...(validRosterPortrait(item.portrait) ? {portrait: item.portrait} : {}),
         }));
-        if (!saveRoster(students)) return false;
+        if (!saveRoster(students, reportError)) return false;
         items.forEach((item, index) => { item.id = students[index].id; });
         paintRoster();
         notify('Trombinoscope enregistré.');
