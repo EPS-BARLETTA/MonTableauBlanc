@@ -251,7 +251,7 @@ function validRosterPortrait(value) {
     footer.className = 'pf-roster-actions';
     const close = button('Fermer');
     close.onclick = () => modal.close();
-    const commit = button(existing ? 'Ajouter les portraits' : 'Créer la liste', 'ink');
+    const commit = button(existing ? 'Enregistrer les élèves et les portraits' : 'Créer la liste', 'ink');
     commit.disabled = true;
     footer.append(close, commit);
     modal.append(progress, list, footer);
@@ -276,11 +276,20 @@ function validRosterPortrait(value) {
         const label = document.createElement('label');
         label.textContent = existing ? tile.name || 'Nom illisible' : 'Nom et prénom ' + (index + 1);
         const field = document.createElement(existing ? 'select' : 'input');
+        let newName;
         if (existing) {
           const match = suggestPortraitStudent(candidates, tile.name);
-          field.append(new Option('À associer', ''), new Option('Ignorer ce portrait', '-'));
+          field.append(new Option('À associer', ''), new Option('Ignorer ce portrait', '-'),
+            new Option('Ajouter comme nouvel élève', 'new'));
           candidates.forEach(p => field.append(new Option(p.name + (p.bib ? ' · n° ' + p.bib : ''), p.id)));
           field.value = match;
+          newName = document.createElement('input');
+          newName.value = tile.name || '';
+          newName.maxLength = 120;
+          newName.autocomplete = 'off';
+          newName.placeholder = 'Nom et prénom';
+          newName.setAttribute('aria-label', 'Nom du nouvel élève ' + (index + 1));
+          newName.hidden = true;
         } else {
           field.value = tile.name || '';
           field.maxLength = 120;
@@ -288,23 +297,34 @@ function validRosterPortrait(value) {
           field.placeholder = 'Laisse vide pour ignorer';
         }
         label.append(field);
+        if (newName) label.append(newName);
         row.append(label);
         list.append(row);
-        return {tile, field, row};
+        return {tile, field, row, newName};
       });
 
       let savedCount = 0;
       const applied = new Set();
+      let currentItems = items;
+
+      function selectionKey({field, newName}) {
+        if (existing && field.value !== 'new') return field.value;
+        const name = portraitNameKey(newName ? newName.value : field.value);
+        return name ? 'name:' + name : '';
+      }
+
       function selections() {
         const counts = new Map();
+        const registeredNames = new Set(currentItems.map(item => portraitNameKey(item.line)));
         const selected = rows.filter(x => x.row.isConnected && x.field.value.trim() && x.field.value !== '-');
-        for (const {field} of selected) {
-          const value = existing ? field.value : portraitNameKey(field.value);
+        for (const selection of selected) {
+          const value = selectionKey(selection);
           counts.set(value, (counts.get(value) || 0) + 1);
         }
-        return selected.filter(({field}) => {
-          const value = existing ? field.value : portraitNameKey(field.value);
-          return counts.get(value) === 1 && !applied.has(value);
+        return selected.filter(selection => {
+          const value = selectionKey(selection);
+          return value && counts.get(value) === 1 && !applied.has(value) &&
+            !(selection.newName && selection.field.value === 'new' && registeredNames.has(portraitNameKey(selection.newName.value)));
         });
       }
 
@@ -314,6 +334,7 @@ function validRosterPortrait(value) {
         let pending = 0;
         for (const entry of rows) {
           if (!entry.row.isConnected) continue;
+          if (entry.newName) entry.newName.hidden = entry.field.value !== 'new';
           const check = entry.field.value !== '-' && !keep.has(entry);
           entry.row.classList.toggle('pf-roster-missing', check);
           if (check) pending++;
@@ -326,15 +347,15 @@ function validRosterPortrait(value) {
         progress.textContent = parts.join(' · ') || 'Aucun portrait à enregistrer.';
         commit.disabled = !ready.length || (!existing && rows.some(x => x.field.value.trim() && !keep.has(x)));
       }
-      list.addEventListener(existing ? 'change' : 'input', update);
-      let currentItems = items;
+      list.addEventListener('input', update);
+      if (existing) list.addEventListener('change', update);
       commit.onclick = () => {
         const ready = selections();
         if (!ready.length) return;
         const next = existing ? currentItems.map(item => ({...item})) : [];
-        for (const {field, tile} of ready) {
-          if (existing) next[Number(field.value)].portrait = tile.photo;
-          else next.push({line: field.value.trim().replace(/\s+/g, ' '), g: 0, portrait: tile.photo});
+        for (const {field, newName, tile} of ready) {
+          if (existing && field.value !== 'new') next[Number(field.value)].portrait = tile.photo;
+          else next.push({line: (newName || field).value.trim().replace(/\s+/g, ' '), g: 0, portrait: tile.photo});
         }
         if (!save(next)) {
           progress.textContent = 'Impossible d’enregistrer les portraits sur cet appareil.';
@@ -343,9 +364,9 @@ function validRosterPortrait(value) {
         currentItems = next;
         savedCount += ready.length;
         if (!existing) { modal.close(); return; }
-        for (const {field, row} of ready) {
-          applied.add(field.value);
-          row.remove();
+        for (const entry of ready) {
+          applied.add(selectionKey(entry));
+          entry.row.remove();
         }
         for (const {field, row} of rows) if (field.value === '-') row.remove();
         if (!rows.some(x => x.row.isConnected)) modal.close();

@@ -82,7 +82,7 @@ function renderBoardDirectory(group) {
     <div class="route-head">
       <h1>${esc(group.name)}</h1>
       <div class="class-nav-actions">
-        <a href="${classRoute(group)}/eleves">Gérer les élèves</a>
+        <a href="${classRoute(group)}/eleves">Élèves et trombinoscope</a>
         <button id="newBoard" class="primary" type="button">+ Nouveau tableau</button>
       </div>
     </div>
@@ -203,7 +203,7 @@ function renderClassForm(group) {
       <div class="roster-import">
         <button id="importPortraits" class="primary" type="button">Importer un trombinoscope</button>
         <input type="file" id="pictureInput" accept="image/png,image/jpeg,.png,.jpg,.jpeg" hidden>
-        <p class="muted">Choisis une capture PRONOTE avec les photos et les noms visibles. Les portraits restent sur l’appareil.</p>
+        <p class="muted">Choisis une capture PRONOTE en JPG ou PNG, avec les photos et les noms visibles. Les portraits restent sur l’appareil.</p>
       </div>
       ${group ? '<h2>Liste des élèves</h2><ul id="rosterPreview" class="roster-preview"></ul>' : ''}
       <label for="manualNames">${group ? 'Ajouter des élèves à la liste' : 'Saisir les élèves à la main'}</label>
@@ -260,6 +260,7 @@ function renderClassForm(group) {
           ...(validRosterPortrait(item.portrait) ? {portrait: item.portrait} : {}),
         }));
         if (!saveRoster(students)) return false;
+        items.forEach((item, index) => { item.id = students[index].id; });
         paintRoster();
         notify('Trombinoscope enregistré.');
         return true;
