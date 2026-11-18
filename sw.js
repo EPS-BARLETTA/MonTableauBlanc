@@ -1,6 +1,6 @@
-const CACHE = 'mon-tableau-blanc-v11';
+const CACHE = 'mon-tableau-blanc-v12';
 const ASSETS = [
-  './', './index.html', './manifest.webmanifest', './app.js', './app.css', './board.js', './board.css', './capture.js',
+  './', './index.html', './manifest.webmanifest', './app.js', './app.css', './board.js', './board.css', './capture.js', './session.js',
   './portraits.js', './ocr/client/tesseract.min.js', './ocr/client/worker.min.js',
   './ocr/core/tesseract-core-lstm.js', './ocr/client/tesseract-core-lstm.wasm', './ocr/lang/fra.traineddata.gz',
 ];

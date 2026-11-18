@@ -129,3 +129,9 @@ input[type="checkbox"] { min-height: 0; width: 22px; height: 22px; flex: none; a
 @media (min-width: 720px) {
   .open-boards-multiple { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+.tool-blue { background: #e2edf9; color: #203f65; border-color: #99b3d3; }
+.tool-purple { background: #efe5f7; color: #513565; border-color: #bca4cc; }
+.tool-green { background: #dfefe5; color: #244d3a; border-color: #91b7a2; }
+.tool-amber { background: #fff0d4; color: #634616; border-color: #c7a765; }
+#sessionName { width: 100%; margin-top: 6px; }

@@ -17,6 +17,13 @@ const BOARD_INK_STROKES = 100;
 const BOARD_REFERENCE_LIMIT = 15 * 1024 * 1024;
 const BOARD_REFERENCE_TYPES = ['application/pdf', 'image/png', 'image/jpeg'];
 
+function boardReferenceType(bytes) {
+  const prefix = Array.from(bytes).join(',');
+  if (prefix.startsWith('37,80,68,70,45,')) return 'application/pdf';
+  if (prefix === '137,80,78,71,13,10,26,10') return 'image/png';
+  if (prefix.startsWith('255,216,255,')) return 'image/jpeg';
+}
+
 function boardFileTransaction(mode, operation) {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open('mon-tableau-blanc-documents', 1);
@@ -89,46 +96,46 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
     <div class="board-heading">
       ${multiple ? `<h2 class="board-title">${esc(group.name)}</h2>` : ''}
       <button id="boardAttendance" class="board-attendance">Appel · 0 absent</button>
+      <button id="boardReferenceToggle" class="tool-blue" aria-pressed="false">Barème ou critères</button>
       <button id="boardCloseView" type="button" aria-label="Fermer ${esc(group.name)}">Fermer</button>
     </div>
+    <details class="board-tools" open><summary>Outils du tableau</summary>
     <div class="board-toolbar">
       <label>Fond<select id="boardBackground">${Object.entries(BOARD_BACKGROUNDS).filter(([key]) => key !== 'tennis' || background === 'tennis').map(([key, label]) =>
         `<option value="${key}" ${key === background ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
       <label id="boardCountLabel">Terrains<select id="boardCourtCount"></select></label>
-      <button id="boardChooseStudents">Élèves du tableau</button><button id="boardAddNote">Ajouter une note</button><button id="boardArchives">Enregistrer</button><button id="boardExpand" aria-pressed="false">Plein écran</button>
-      <button id="boardDistribute">Répartir les présents</button>
+      <button id="boardChooseStudents" class="tool-blue">Élèves du tableau</button><button id="boardAddNote" class="tool-amber">Ajouter une note</button><button id="boardArchives">Enregistrer ce tableau</button><button id="boardExpand" aria-pressed="false">Plein écran</button>
+      <button id="boardDistribute" class="tool-green">Répartir les présents</button>
     </div>
     <div class="board-writing">
-      <button id="boardAddText">Texte / Pencil</button>
-      <button id="boardReferenceToggle">Barème ou critères</button>
-      <details class="board-drawing-tools">
-        <summary>Dessin libre</summary>
-        <button id="boardDraw" aria-pressed="false">Tracer sur le tableau</button>
-        <button id="boardUndoInk" disabled>Annuler le dernier trait</button>
-      </details>
-    </div>
+      <button id="boardAddText" class="tool-purple">Texte / Pencil</button>
+      <button id="boardDraw" class="tool-purple" aria-pressed="false">Dessin libre</button>
+      <button id="boardUndoInk" disabled hidden>Annuler le dernier trait</button>
+    </div></details>
     <p class="muted board-help">Glisse les portraits librement. Double-touche ou double-clique sur un élève pour l’agrandir. Appuie longuement sur un espace libre pour ajouter une note. Glisse une note sur un portrait pour les associer.</p>
     <p id="boardLadderHelp" class="muted board-ladder-help" hidden>Terrain 1 en haut. Les gagnants montent vers le terrain précédent et les perdants descendent vers le suivant. Déplace les élèves à la main.</p>
     <div id="boardWorkspace" class="board-workspace"><div id="boardSurface" class="board-surface" role="region" aria-label="Tableau de ${esc(group.name)}">
       <div id="boardFloor" class="board-floor" aria-hidden="true"></div>
       <div id="boardGroupZones" class="board-group-zones" hidden></div>
-      <svg id="boardInk" class="board-ink" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true"></svg>
+      <div id="boardInkInput" class="board-ink" aria-hidden="true">
+        <svg id="boardInk" viewBox="0 0 1000 1000" preserveAspectRatio="none"></svg>
+      </div>
     </div>
     <aside class="board-notes" aria-labelledby="boardNotesTitle">
       <h2 id="boardNotesTitle">Notes <span id="boardNoteCount">0</span></h2>
       <ol id="boardNoteList"></ol>
-    </aside></div>
-    <dialog id="boardReference" class="board-reference" aria-labelledby="boardReferenceTitle">
+    </aside>
+    <aside id="boardReference" class="board-reference" aria-labelledby="boardReferenceTitle" hidden>
       <h2 id="boardReferenceTitle">Barème ou critères</h2>
       <div class="board-reference-actions">
         <button id="boardImportReference">Importer un document</button>
         <button id="boardRemoveReference" hidden>Retirer</button>
-        <button id="boardReferenceClose" class="primary">Revenir au tableau</button>
+        <button id="boardReferenceClose">Masquer</button>
         <input id="boardReferenceFile" type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" hidden>
       </div>
       <p id="boardReferenceStatus" role="status"></p>
       <div id="boardReferencePreview"></div>
-    </dialog>
+    </aside></div>
     <dialog id="boardAttendanceDialog" aria-labelledby="boardAttendanceTitle">
       <h2 id="boardAttendanceTitle">Faire l’appel</h2>
       <p id="boardAttendanceStatus" role="status"></p>
@@ -197,6 +204,7 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
   const workspace = $('boardWorkspace');
   const expand = $('boardExpand');
   const ink = $('boardInk');
+  const inkInput = $('boardInkInput');
   const draw = $('boardDraw');
   const undoInk = $('boardUndoInk');
   let stroke;
@@ -295,6 +303,7 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
       return line;
     }));
     undoInk.disabled = !layout.ink.length;
+    undoInk.hidden = !layout.ink.length;
   }
 
   function extendStroke(event) {
@@ -310,26 +319,27 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
   }
 
   draw.onclick = () => {
-    const active = ink.classList.toggle('board-ink-active');
-    draw.textContent = active ? 'Terminer le dessin' : 'Tracer sur le tableau';
+    const active = inkInput.classList.toggle('board-ink-active');
+    draw.textContent = active ? 'Terminer le dessin' : 'Dessin libre';
     draw.setAttribute('aria-pressed', String(active));
   };
-  ink.addEventListener('pointerdown', event => {
+  inkInput.addEventListener('pointerdown', event => {
     event.stopPropagation();
-    if (event.button !== 0 || stroke) return;
+    if ((event.pointerType === 'mouse' && event.button !== 0) || stroke) return;
+    event.preventDefault();
     if (layout.ink.length >= BOARD_INK_STROKES) {
       notify('Ce tableau contient déjà 100 traits. Annule le dernier trait pour continuer.');
       return;
     }
     stroke = {id: event.pointerId, points: [], line: inkLine()};
     ink.append(stroke.line);
-    ink.setPointerCapture(event.pointerId);
+    inkInput.setPointerCapture(event.pointerId);
     extendStroke(event);
   });
-  ink.addEventListener('pointermove', event => {
+  inkInput.addEventListener('pointermove', event => {
     if (stroke?.id === event.pointerId) extendStroke(event);
   });
-  ink.addEventListener('pointerup', event => {
+  inkInput.addEventListener('pointerup', event => {
     if (stroke?.id !== event.pointerId) return;
     extendStroke(event);
     const previous = layout.ink;
@@ -338,7 +348,7 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
     stroke = null;
     paintInk();
   });
-  ink.addEventListener('lostpointercapture', event => {
+  inkInput.addEventListener('lostpointercapture', event => {
     if (stroke?.id !== event.pointerId) return;
     stroke.line.remove();
     stroke = null;
@@ -382,8 +392,14 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
     }
   }
 
-  referenceToggle.onclick = () => referencePanel.showModal();
-  $('boardReferenceClose').onclick = () => referencePanel.close();
+  function showReference(open) {
+    referencePanel.hidden = !open;
+    container.classList.toggle('board-with-reference', open);
+    workspace.classList.toggle('board-with-reference', open);
+    referenceToggle.setAttribute('aria-pressed', String(open));
+  }
+  referenceToggle.onclick = () => showReference(referencePanel.hidden);
+  $('boardReferenceClose').onclick = () => showReference(false);
   importReference.onclick = () => referenceFile.click();
   referenceFile.onchange = async () => {
     const file = referenceFile.files[0];
@@ -393,11 +409,7 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
     try {
       if (file.size > BOARD_REFERENCE_LIMIT) throw Error('Le document dépasse 15 Mo.');
       const bytes = new Uint8Array(await file.slice(0, 8).arrayBuffer());
-      const prefix = Array.from(bytes).join(',');
-      let type;
-      if (prefix.startsWith('37,80,68,70,45,')) type = 'application/pdf';
-      if (prefix === '137,80,78,71,13,10,26,10') type = 'image/png';
-      if (prefix.startsWith('255,216,255,')) type = 'image/jpeg';
+      const type = boardReferenceType(bytes);
       if (!type) throw Error('Choisis un document PDF, JPG ou PNG.');
       if (!boardIsCurrent()) return;
       const id = uid();

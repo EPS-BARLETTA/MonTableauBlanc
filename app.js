@@ -47,7 +47,7 @@ function save(reportError = notify) {
 }
 
 function download(name, data, type) {
-  const url = URL.createObjectURL(new Blob([data], {type}));
+  const url = URL.createObjectURL(data instanceof Blob ? data : new Blob([data], {type}));
   const link = document.createElement('a');
   link.href = url;
   link.download = name;
@@ -88,36 +88,58 @@ function rememberSession(group, boards) {
   return false;
 }
 
+function openSession(group, session, hidden = []) {
+  const route = `${classRoute(group)}/seance/${session.id}` + (hidden.length ? '/' + hidden.join(',') : '');
+  if (location.hash === route) render();
+  else location.hash = route;
+}
+
 function renderBoardDirectory(group) {
-  const session = (group.sessionBoards || []).map(id => group.boards.find(board => board.id === id)).filter(Boolean);
-  const resume = session.length ? session : group.boards.slice(0, MAX_OPEN_BOARDS);
+  const standalone = group.boards.filter(board => !board.panels?.length);
+  const session = (group.sessionBoards || []).map(id => standalone.find(board => board.id === id)).filter(Boolean);
+  const resume = session.length > 1 ? session : standalone.slice(0, MAX_OPEN_BOARDS);
   content.innerHTML = `<section class="route">
     <a class="back-link" href="#classes">← Mes classes</a>
     <div class="route-head">
       <h1>${esc(group.name)}</h1>
       <div class="class-nav-actions">
-        ${resume.length > 1 || session.length ? `<button id="resumeSession" class="primary" type="button">${session.length ? 'Reprendre la séance' : 'Ouvrir les tableaux ensemble'} · ${resume.length}</button>` : ''}
+        ${resume.length > 1 ? `<button id="resumeSession" class="primary" type="button">${session.length ? 'Reprendre la séance' : 'Ouvrir les tableaux ensemble'} · ${resume.length}</button>` : ''}
         <a href="${classRoute(group)}/eleves">Élèves et trombinoscope</a>
-        <button id="newBoard" class="primary" type="button">+ Nouveau tableau</button>
+        <button id="importSession" type="button">Importer une séance</button>
+        <input id="sessionFile" hidden type="file" accept=".json,application/json">
+        <button id="newBoard" class="primary" type="button">+ Nouvelle séance</button>
       </div>
     </div>
     ${group.boards.length ? `<div class="class-grid">${group.boards.map(board => `<div class="board-directory-card">
-      <a href="${boardRoute(group, board)}">${esc(board.name)}</a>
+      <a href="${boardRoute(group, board)}">${esc(board.name)}${board.panels?.length ? ` · ${board.panels.length + 1} tableaux` : ''}</a>
       <button class="board-delete danger" type="button" data-delete-board="${esc(board.id)}"
         aria-label="Supprimer ${esc(board.name)}" title="Supprimer le tableau">×</button>
     </div>`).join('')}</div>` : '<p>Aucun tableau dans cette classe.</p>'}
     <dialog id="newBoardDialog" aria-labelledby="newBoardTitle">
-      <h2 id="newBoardTitle">Nouveau tableau</h2>
+      <h2 id="newBoardTitle">Nouvelle séance</h2>
       <form id="createBoard">
-        <label for="newBoardName">Nom du tableau</label>
+        <label for="newBoardName">Nom de la séance</label>
         <input id="newBoardName" maxlength="80" placeholder="Ex. Badminton" required autofocus>
         <div class="actions">
           <button id="cancelNewBoard" type="button">Annuler</button>
-          <button class="primary" type="submit">Créer le tableau</button>
+          <button class="primary" type="submit">Créer la séance</button>
         </div>
       </form>
     </dialog>
   </section>`;
+  $('importSession').onclick = () => $('sessionFile').click();
+  $('sessionFile').onchange = async event => {
+    const input = event.currentTarget;
+    const file = input.files[0];
+    input.value = '';
+    if (!file) return;
+    try {
+      const session = await importSessionFile(file, group);
+      if (session) openSession(group, session);
+    } catch (error) {
+      notify(error.message);
+    }
+  };
   const dialog = $('newBoardDialog');
   const resumeButton = $('resumeSession');
   if (resumeButton) resumeButton.onclick = () => openBoardView(group, resume);
@@ -129,7 +151,7 @@ function renderBoardDirectory(group) {
     const name = input.value.trim();
     if (!name) { input.focus(); return; }
     const board = createNamedBoard(group, name);
-    if (board) openBoardView(group, [board]);
+    if (board) openSession(group, board);
   };
   for (const button of content.querySelectorAll('[data-delete-board]')) {
     button.onclick = () => {
@@ -145,45 +167,94 @@ function renderBoardDirectory(group) {
   }
 }
 
-function renderOpenBoards(group, boards) {
+function renderOpenBoards(group, boards, session = null, hidden = []) {
   const students = [...group.students].sort((a, b) => a.name.localeCompare(b.name, 'fr'));
   const multiple = boards.length > 1;
-  const canAddBoard = boards.length < MAX_OPEN_BOARDS;
-  const available = group.boards.filter(board => !boards.includes(board));
+  const allPanels = session ? [session, ...(session.panels || [])] : boards;
+  const canAddBoard = session || boards.length < MAX_OPEN_BOARDS;
+  const available = (session ? allPanels : group.boards).filter(board => !boards.includes(board));
+  const sessionName = session?.name || (multiple ? group.name : boards[0].name);
   content.innerHTML = `<div class="class-nav">
     <a href="${classRoute(group)}">← Tableaux de ${esc(group.name)}</a>
-    <h1>${esc(multiple ? group.name : boards[0].name)}</h1>
+    <h1>${esc(sessionName)}</h1>
     <div class="class-nav-actions">
-      <button id="saveSession" type="button">Enregistrer la séance</button>
+      <button id="saveSession" class="tool-purple" type="button">${session ? 'Nommer la séance' : 'Regrouper et nommer'}</button>
+      <button id="exportSession" class="tool-blue" type="button">Télécharger la séance</button>
       <button id="captureSession" type="button">Capture PNG</button>
-      ${canAddBoard ? '<button id="addOpenBoard" class="primary" type="button">+ Ajouter un tableau</button>' : '<span class="muted">4 tableaux ouverts</span>'}
+      ${canAddBoard ? '<button id="addOpenBoard" class="primary" type="button">+ Ajouter un tableau</button>' : ''}
       ${canAddBoard && available.length ? `<select id="openSavedBoard" aria-label="Ouvrir un tableau enregistré">
         <option value="">Ouvrir un tableau enregistré</option>
         ${available.map(board => `<option value="${esc(board.id)}">${esc(board.name)}</option>`).join('')}
       </select>` : ''}
       <a href="${classRoute(group)}/eleves">Gérer les élèves</a>
     </div>
-  </div><div class="open-boards${multiple ? ' open-boards-multiple' : ''}"></div>`;
-  if (multiple) rememberSession(group, boards);
+  </div><dialog id="sessionNameDialog"><form id="sessionNameForm"><label for="sessionName">Nom de la séance</label><input id="sessionName" maxlength="80" required><div class="actions"><button id="sessionNameCancel" type="button">Annuler</button><button class="primary">Enregistrer</button></div></form></dialog><div class="open-boards${multiple ? ' open-boards-multiple' : ''}"></div>`;
+  if (!session && multiple) rememberSession(group, boards);
+  const nameDialog = $('sessionNameDialog');
   $('saveSession').onclick = () => {
-    if (rememberSession(group, boards)) notify('Séance enregistrée. Retrouve-la depuis la page de la classe.');
+    $('sessionName').value = sessionName;
+    nameDialog.showModal();
+  };
+  $('sessionNameCancel').onclick = () => nameDialog.close();
+  $('sessionNameForm').onsubmit = event => {
+    event.preventDefault();
+    const name = $('sessionName').value.trim();
+    if (!name) return;
+    if (session) {
+      const previous = session.name;
+      session.name = name;
+      if (!save()) { session.name = previous; return; }
+      openSession(group, session, hidden);
+      return;
+    }
+    const [first, ...others] = boards;
+    const combined = {...first, id: uid(), name,
+      panels: others.map(board => ({id: uid(), name: board.name, board: board.board, boardArchives: board.boardArchives}))};
+    group.boards.push(combined);
+    if (save()) openSession(group, combined);
+    else group.boards.pop();
+  };
+  $('exportSession').onclick = async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      await downloadSessionFile(group, sessionName, allPanels);
+    } catch (error) {
+      notify(error.message || 'Impossible d’exporter cette séance.');
+    } finally {
+      button.disabled = false;
+    }
   };
   if (canAddBoard) {
-    $('addOpenBoard').onclick = event => {
-      let number = group.boards.length + 1;
-      const names = new Set(group.boards.map(board => board.name));
-      while (names.has(`Tableau ${number}`)) number++;
-      const board = createNamedBoard(group, `Tableau ${number}`);
-      if (!board) return;
-      event.currentTarget.disabled = true;
-      openBoardView(group, [...boards, board]);
+    $('addOpenBoard').onclick = () => {
+      if (session) {
+        const previous = session.panels;
+        const existing = previous || [];
+        const names = new Set(existing.map(panel => panel.name));
+        let number = existing.length + 2;
+        while (names.has(`Tableau ${number}`)) number++;
+        session.panels = [...existing, {id: uid(), name: `Tableau ${number}`}];
+        if (save()) openSession(group, session, hidden);
+        else session.panels = previous;
+        return;
+      }
+      const [first, ...others] = boards;
+      const combined = {...first, id: uid(), panels: [
+        ...others.map(board => ({id: uid(), name: board.name, board: board.board, boardArchives: board.boardArchives})),
+        {id: uid(), name: `Tableau ${boards.length + 1}`},
+      ]};
+      group.boards.push(combined);
+      if (save()) openSession(group, combined);
+      else group.boards.pop();
     };
   }
   const savedPicker = $('openSavedBoard');
   if (savedPicker) {
     savedPicker.onchange = () => {
       const board = available.find(item => item.id === savedPicker.value);
-      if (board) openBoardView(group, [...boards, board]);
+      if (!board) return;
+      if (session) openSession(group, session, hidden.filter(id => id !== board.id));
+      else openBoardView(group, [...boards, board]);
     };
   }
   const grid = content.querySelector('.open-boards');
@@ -204,7 +275,11 @@ function renderOpenBoards(group, boards) {
     grid.append(container);
     renderClassBoard(board, students, group.id, container, multiple,
       (name, layout) => createNamedBoard(group, name, layout),
-      () => openBoardView(group, boards.filter(item => item !== board)));
+      () => {
+        if (!session) openBoardView(group, boards.filter(item => item !== board));
+        else if (boards.length === 1) location.hash = classRoute(group);
+        else openSession(group, session, [...hidden, board.id]);
+      });
   }
 }
 
@@ -326,7 +401,7 @@ function renderClassForm(group) {
 }
 
 function render() {
-  const [page, id, subpage, boardId] = location.hash.slice(1).split('/');
+  const [page, id, subpage, boardId, hiddenIds] = location.hash.slice(1).split('/');
   $('navHome').hidden = !page || page === 'accueil';
   if (!page) {
     content.innerHTML = cover;
@@ -340,6 +415,13 @@ function render() {
       renderDirectory();
     } else if (subpage === 'eleves') {
       renderClassForm(group);
+    } else if (subpage === 'seance' || subpage === 'tableau') {
+      const session = group.boards.find(board => board.id === boardId);
+      if (!session) { renderBoardDirectory(group); return; }
+      const hidden = (hiddenIds || '').split(',').filter(Boolean);
+      const panels = [session, ...(session.panels || [])].filter(panel => !hidden.includes(panel.id));
+      if (panels.length) renderOpenBoards(group, panels, session, hidden);
+      else renderBoardDirectory(group);
     } else {
       const ids = subpage === 'tableaux' ? (boardId || '').split(',').slice(0, MAX_OPEN_BOARDS)
         : subpage === 'tableau' ? [boardId] : [];
