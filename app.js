@@ -7,6 +7,7 @@ const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({
 const uid = () => crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const today = () => new Date().toISOString().slice(0, 10);
 const STORAGE_KEY = 'mon-tableau-blanc-v1';
+const MAX_OPEN_BOARDS = 4;
 const content = $('content');
 const cover = content.innerHTML;
 let classes = [];
@@ -122,7 +123,7 @@ function renderBoardDirectory(group, showMulti) {
   function refreshSelection() {
     const count = checks.filter(check => check.checked).length;
     $('openSelected').disabled = count < 2;
-    checks.forEach(check => { check.disabled = count === 4 && !check.checked; });
+    checks.forEach(check => { check.disabled = count >= MAX_OPEN_BOARDS && !check.checked; });
   }
   refreshSelection();
   selection.onchange = refreshSelection;
@@ -130,21 +131,34 @@ function renderBoardDirectory(group, showMulti) {
   selection.onsubmit = event => {
     event.preventDefault();
     const selected = checks.filter(check => check.checked).map(check => check.value);
-    if (selected.length >= 2 && selected.length <= 4) location.hash = multipleBoardRoute(group, selected);
+    if (selected.length >= 2 && selected.length <= MAX_OPEN_BOARDS) location.hash = multipleBoardRoute(group, selected);
   };
 }
 
 function renderOpenBoards(group, boards) {
   const students = [...group.students].sort((a, b) => a.name.localeCompare(b.name, 'fr'));
   const multiple = boards.length > 1;
+  const canAddBoard = boards.length < MAX_OPEN_BOARDS;
   content.innerHTML = `<div class="class-nav">
     <a href="${classRoute(group)}">← Tableaux de ${esc(group.name)}</a>
     <h1>${esc(multiple ? group.name : boards[0].name)}</h1>
     <div class="class-nav-actions">
-      <a class="action primary" href="${classRoute(group)}/multi">${multiple ? 'Choisir les tableaux' : 'Multi-tableaux'}</a>
+      ${canAddBoard ? '<button id="addOpenBoard" class="primary" type="button">+ Ajouter un tableau</button>' : '<span class="muted">4 tableaux ouverts</span>'}
+      ${group.boards.length > 1 ? `<a href="${classRoute(group)}/multi">Choisir les tableaux</a>` : ''}
       <a href="${classRoute(group)}/eleves">Gérer les élèves</a>
     </div>
   </div><div class="open-boards${multiple ? ' open-boards-multiple' : ''}"></div>`;
+  if (canAddBoard) {
+    $('addOpenBoard').onclick = event => {
+      let number = group.boards.length + 1;
+      const names = new Set(group.boards.map(board => board.name));
+      while (names.has(`Tableau ${number}`)) number++;
+      const board = createNamedBoard(group, `Tableau ${number}`);
+      if (!board) return;
+      event.currentTarget.disabled = true;
+      location.hash = multipleBoardRoute(group, [...boards, board].map(item => item.id));
+    };
+  }
   const grid = content.querySelector('.open-boards');
   for (const board of boards) {
     const container = document.createElement('div');
@@ -285,7 +299,7 @@ function render() {
     } else if (subpage === 'eleves') {
       renderClassForm(group);
     } else {
-      const ids = subpage === 'tableaux' ? (boardId || '').split(',').slice(0, 4)
+      const ids = subpage === 'tableaux' ? (boardId || '').split(',').slice(0, MAX_OPEN_BOARDS)
         : subpage === 'tableau' ? [boardId] : [];
       const boards = group.boards.filter(board => ids.includes(board.id));
       if (boards.length) renderOpenBoards(group, boards);
