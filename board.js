@@ -12,6 +12,30 @@ const BOARD_BACKGROUNDS = {
 };
 const boardClamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const boardNumber = (value, fallback) => Number.isFinite(value) ? boardClamp(value, 0, 100) : fallback;
+const BOARD_INK_POINTS = 500;
+const BOARD_INK_STROKES = 100;
+const BOARD_REFERENCE_LIMIT = 15 * 1024 * 1024;
+const BOARD_REFERENCE_TYPES = ['application/pdf', 'image/png', 'image/jpeg'];
+
+function boardFileTransaction(mode, operation) {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open('mon-tableau-blanc-documents', 1);
+    request.onupgradeneeded = () => request.result.createObjectStore('references');
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const db = request.result;
+      try {
+        const transaction = db.transaction('references', mode);
+        const result = operation(transaction.objectStore('references'));
+        transaction.oncomplete = () => { db.close(); resolve(result.result); };
+        transaction.onabort = () => { db.close(); reject(transaction.error); };
+      } catch (error) {
+        db.close();
+        reject(error);
+      }
+    };
+  });
+}
 
 function boardFirstName(name) {
   const words = name.trim().split(/\s+/);
@@ -31,15 +55,22 @@ function normalizeBoard(raw, studentIds) {
   }
   const roster = new Set(studentIds);
   const marks = Array.isArray(raw.marks) ? raw.marks : [];
+  const reference = raw.reference;
   return {
     background: Object.hasOwn(BOARD_BACKGROUNDS, raw.background) ? raw.background : 'blank',
     courts: boardClamp(Math.round(Number(raw.courts)) || 1, 1, 4),
     ladderCourts: boardClamp(Math.round(Number(raw.ladderCourts)) || 6, 1, 12),
     positions,
     studentIds: Array.isArray(raw.studentIds) ? [...new Set(raw.studentIds.filter(id => roster.has(id)))] : null,
+    ink: Array.isArray(raw.ink) ? raw.ink.slice(0, BOARD_INK_STROKES).filter(line =>
+      typeof line === 'string' && line.length <= BOARD_INK_POINTS * 10 &&
+      /^(?:\d{1,4},\d{1,4})(?: \d{1,4},\d{1,4})*$/.test(line)) : [],
+    reference: reference && typeof reference.id === 'string' && /^[\w-]{1,80}$/.test(reference.id) &&
+      typeof reference.name === 'string' && BOARD_REFERENCE_TYPES.includes(reference.type)
+      ? {id: reference.id, name: reference.name.slice(0, 180), type: reference.type} : null,
     marks: marks.filter(m => m && typeof m.id === 'string' && /^[\w-]{1,80}$/.test(m.id) &&
-      ['note', 'group'].includes(m.type) && typeof m.text === 'string').slice(0, 100).map(m => ({
-      id: m.id, type: m.type, text: m.text.slice(0, m.type === 'note' ? 1200 : 32),
+      ['note', 'group', 'text'].includes(m.type) && typeof m.text === 'string').slice(0, 100).map(m => ({
+      id: m.id, type: m.type, text: m.text.slice(0, m.type === 'group' ? 32 : 1200),
       x: boardNumber(m.x, 50), y: boardNumber(m.y, 50),
       ...(m.type === 'note' && roster.has(m.studentId) ? {studentId: m.studentId} : {}),
     })),
@@ -63,14 +94,31 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
       <label id="boardCountLabel">Terrains<select id="boardCourtCount"></select></label>
       <button id="boardChooseStudents">Élèves du tableau</button><button id="boardAddNote">Ajouter une note</button><button id="boardArchives">Enregistrer</button><button id="boardExpand" aria-pressed="false">Plein écran</button>
     </div>
+    <div class="board-writing">
+      <button id="boardDraw" aria-pressed="false">Écrire au Pencil</button>
+      <button id="boardUndoInk" disabled>Annuler le dernier trait</button>
+      <button id="boardAddText">Ajouter du texte</button>
+      <button id="boardReferenceToggle" aria-pressed="false">Barème ou critères</button>
+    </div>
     <p class="muted board-help">Glisse les portraits librement. Double-touche ou double-clique sur un élève pour l’agrandir. Appuie longuement sur un espace libre pour ajouter une note. Glisse une note sur un portrait pour les associer.</p>
     <p id="boardLadderHelp" class="muted board-ladder-help" hidden>Terrain 1 en haut. Les gagnants montent vers le terrain précédent et les perdants descendent vers le suivant. Déplace les élèves à la main.</p>
     <div id="boardWorkspace" class="board-workspace"><div id="boardSurface" class="board-surface" role="region" aria-label="Tableau de ${esc(group.name)}">
       <div id="boardFloor" class="board-floor" aria-hidden="true"></div>
+      <svg id="boardInk" class="board-ink" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true"></svg>
     </div>
     <aside class="board-notes" aria-labelledby="boardNotesTitle">
       <h2 id="boardNotesTitle">Notes <span id="boardNoteCount">0</span></h2>
       <ol id="boardNoteList"></ol>
+    </aside>
+    <aside id="boardReference" class="board-reference" aria-labelledby="boardReferenceTitle" hidden>
+      <h2 id="boardReferenceTitle">Barème ou critères</h2>
+      <div class="board-reference-actions">
+        <button id="boardImportReference">Importer un document</button>
+        <button id="boardRemoveReference" hidden>Retirer</button>
+        <input id="boardReferenceFile" type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" hidden>
+      </div>
+      <p id="boardReferenceStatus" role="status"></p>
+      <div id="boardReferencePreview"></div>
     </aside></div>
     <dialog id="boardRosterDialog" aria-labelledby="boardRosterTitle">
       <h2 id="boardRosterTitle">Élèves · ${esc(group.name)}</h2>
@@ -91,7 +139,7 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
         <div class="board-archive-controls"><input id="boardArchiveName" maxlength="80" required><button>Enregistrer comme nouveau tableau</button></div>
       </form>
       <ul id="boardArchiveList" class="board-archive-list"></ul>
-      <p class="muted">Le fichier contient le fond, les positions, les groupes et les notes. À la réouverture, les portraits viennent de la classe.</p>
+      <p class="muted">Le fichier contient la disposition, les notes, le texte et les traits. Les portraits et le document importé restent sur cet appareil.</p>
       <p id="boardArchiveStatus" class="board-archive-status" role="status"></p>
       <div class="actions">
         <button id="boardDownload">Télécharger le tableau</button>
@@ -106,7 +154,7 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
     <dialog id="boardEditor" aria-labelledby="boardEditorTitle">
       <form id="boardForm">
         <h2 id="boardEditorTitle"></h2>
-        <label id="boardTextLabel" for="boardText"></label><textarea id="boardText" rows="4" maxlength="1200" required></textarea>
+      <label id="boardTextLabel" for="boardText"></label><textarea id="boardText" rows="4" maxlength="1200" required></textarea>
         <label id="boardStudentLabel">Associer à un élève<select id="boardNoteStudent">
           <option value="">Note libre</option>
           ${students.map(student => `<option value="${esc(student.id)}">${esc(student.name)}</option>`).join('')}
@@ -121,6 +169,18 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
   const surface = $('boardSurface');
   const workspace = $('boardWorkspace');
   const expand = $('boardExpand');
+  const ink = $('boardInk');
+  const draw = $('boardDraw');
+  const undoInk = $('boardUndoInk');
+  let stroke;
+  const referencePanel = $('boardReference');
+  const referenceToggle = $('boardReferenceToggle');
+  const referenceFile = $('boardReferenceFile');
+  const referenceStatus = $('boardReferenceStatus');
+  const referencePreview = $('boardReferencePreview');
+  const removeReference = $('boardRemoveReference');
+  const importReference = $('boardImportReference');
+  let referenceUrl;
 
   function setExpanded(expanded) {
     panel.classList.toggle('board-expanded', expanded);
@@ -181,6 +241,153 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
     group.board = previous;
     return false;
   }
+
+  function inkLine() {
+    return document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+  }
+
+  function paintInk() {
+    ink.replaceChildren(...layout.ink.map(points => {
+      const line = inkLine();
+      line.setAttribute('points', points);
+      return line;
+    }));
+    undoInk.disabled = !layout.ink.length;
+  }
+
+  function extendStroke(event) {
+    const rect = ink.getBoundingClientRect();
+    const x = Math.round(boardClamp((event.clientX - rect.left) * 1000 / rect.width, 0, 1000));
+    const y = Math.round(boardClamp((event.clientY - rect.top) * 1000 / rect.height, 0, 1000));
+    const point = `${x},${y}`;
+    if (stroke.points.at(-1) === point) return;
+    if (stroke.points.length === BOARD_INK_POINTS) stroke.points = stroke.points.filter((_, i) => i % 2 === 0);
+    stroke.points.push(point);
+    const points = stroke.points.length === 1 ? `${point} ${x},${y + 1}` : stroke.points.join(' ');
+    stroke.line.setAttribute('points', points);
+  }
+
+  draw.onclick = () => {
+    const active = ink.classList.toggle('board-ink-active');
+    draw.textContent = active ? 'Terminer l’écriture' : 'Écrire au Pencil';
+    draw.setAttribute('aria-pressed', String(active));
+  };
+  ink.addEventListener('pointerdown', event => {
+    event.stopPropagation();
+    if (event.button !== 0 || stroke || event.pointerType === 'touch') return;
+    if (layout.ink.length >= BOARD_INK_STROKES) {
+      notify('Ce tableau contient déjà 100 traits. Annule le dernier trait pour continuer.');
+      return;
+    }
+    stroke = {id: event.pointerId, points: [], line: inkLine()};
+    ink.append(stroke.line);
+    ink.setPointerCapture(event.pointerId);
+    extendStroke(event);
+  });
+  ink.addEventListener('pointermove', event => {
+    if (stroke?.id === event.pointerId) extendStroke(event);
+  });
+  ink.addEventListener('pointerup', event => {
+    if (stroke?.id !== event.pointerId) return;
+    extendStroke(event);
+    const previous = layout.ink;
+    layout.ink = [...previous, stroke.line.getAttribute('points')];
+    if (!writeBoard()) layout.ink = previous;
+    stroke = null;
+    paintInk();
+  });
+  ink.addEventListener('lostpointercapture', event => {
+    if (stroke?.id !== event.pointerId) return;
+    stroke.line.remove();
+    stroke = null;
+  });
+  undoInk.onclick = () => {
+    if (stroke) return;
+    const previous = layout.ink;
+    layout.ink = previous.slice(0, -1);
+    if (!writeBoard()) layout.ink = previous;
+    paintInk();
+  };
+
+  async function paintReference() {
+    const reference = layout.reference;
+    if (referenceUrl) URL.revokeObjectURL(referenceUrl);
+    referenceUrl = null;
+    referencePreview.replaceChildren();
+    removeReference.hidden = !reference;
+    referenceStatus.textContent = reference ? 'Ouverture du document…' : 'PDF, JPG ou PNG · 15 Mo maximum.';
+    if (!reference) return;
+    try {
+      const file = await boardFileTransaction('readonly', store => store.get(reference.id));
+      if (!boardIsCurrent() || layout.reference !== reference) return;
+      if (!file) throw Error('Document absent de cet appareil.');
+      referenceUrl = URL.createObjectURL(file);
+      const view = document.createElement(reference.type === 'application/pdf' ? 'iframe' : 'img');
+      view.src = referenceUrl;
+      if (view.tagName === 'IFRAME') view.title = reference.name;
+      else view.alt = reference.name;
+      const link = document.createElement('a');
+      link.textContent = 'Ouvrir le document';
+      link.href = referenceUrl;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      referencePreview.append(link, view);
+      referenceStatus.textContent = reference.name;
+    } catch (error) {
+      if (boardIsCurrent() && layout.reference === reference) {
+        referenceStatus.textContent = error.message || 'Impossible d’ouvrir le document.';
+      }
+    }
+  }
+
+  function showReference(open) {
+    referencePanel.hidden = !open;
+    workspace.classList.toggle('board-with-reference', open);
+    referenceToggle.setAttribute('aria-pressed', String(open));
+  }
+
+  referenceToggle.onclick = () => showReference(referencePanel.hidden);
+  importReference.onclick = () => referenceFile.click();
+  referenceFile.onchange = async () => {
+    const file = referenceFile.files[0];
+    referenceFile.value = '';
+    if (!file) return;
+    importReference.disabled = removeReference.disabled = true;
+    try {
+      if (file.size > BOARD_REFERENCE_LIMIT) throw Error('Le document dépasse 15 Mo.');
+      const bytes = new Uint8Array(await file.slice(0, 8).arrayBuffer());
+      const prefix = Array.from(bytes).join(',');
+      let type;
+      if (prefix.startsWith('37,80,68,70,45,')) type = 'application/pdf';
+      if (prefix === '137,80,78,71,13,10,26,10') type = 'image/png';
+      if (prefix.startsWith('255,216,255,')) type = 'image/jpeg';
+      if (!type) throw Error('Choisis un document PDF, JPG ou PNG.');
+      if (!boardIsCurrent()) return;
+      const id = uid();
+      await boardFileTransaction('readwrite', store => store.put(file.slice(0, file.size, type), id));
+      const previous = layout.reference;
+      if (boardIsCurrent()) {
+        layout.reference = {id, name: file.name.slice(0, 180), type};
+        if (writeBoard()) {
+          await paintReference();
+          return;
+        }
+        layout.reference = previous;
+        referenceStatus.textContent = 'Le document n’a pas pu être associé à ce tableau.';
+      }
+      await boardFileTransaction('readwrite', store => store.delete(id));
+    } catch (error) {
+      referenceStatus.textContent = error.message || 'Impossible d’enregistrer ce document.';
+    } finally {
+      importReference.disabled = removeReference.disabled = false;
+    }
+  };
+  removeReference.onclick = () => {
+    const previous = layout.reference;
+    layout.reference = null;
+    if (writeBoard()) paintReference();
+    else layout.reference = previous;
+  };
 
   function point(element, x, y) {
     const insetX = Math.min(49, element.offsetWidth * 50 / surface.clientWidth);
@@ -248,15 +455,14 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
       else resize.disconnect();
     });
     resize.observe(surface);
-    const lifetime = new MutationObserver(() => {
-      if (!boardIsCurrent()) {
-        resize.disconnect();
-        lifetime.disconnect();
-        cancelGesture();
-      }
-    });
-    lifetime.observe(document.getElementById('content'), {childList: true});
   }
+  const lifetime = new MutationObserver(() => {
+    if (boardIsCurrent()) return;
+    if (referenceUrl) URL.revokeObjectURL(referenceUrl);
+    lifetime.disconnect();
+    cancelGesture();
+  });
+  lifetime.observe(document.getElementById('content'), {childList: true});
 
   function makeDraggable(element, position, persistPosition, activate, twice = false) {
     element.classList.add('board-movable');
@@ -360,7 +566,8 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
       const owner = students.find(student => student.id === mark.studentId);
       if (owner) element.classList.add('board-note-attached');
       if (number) element.dataset.boardNote = '';
-      element.setAttribute('aria-label', number ? `Ouvrir la note ${number}` : `Modifier le groupe ${mark.text}`);
+      element.setAttribute('aria-label', number ? `Ouvrir la note ${number}`
+        : mark.type === 'text' ? `Modifier le texte ${mark.text}` : `Modifier le groupe ${mark.text}`);
       if (number) {
         const item = document.createElement('li');
         const link = document.createElement('button');
@@ -488,9 +695,10 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
     editing = {type, position, mark};
     const isNote = type === 'note';
     const notes = layout.marks.filter(entry => entry.type === 'note');
-    $('boardEditorTitle').textContent = isNote ? `Note ${mark ? notes.indexOf(mark) + 1 : notes.length + 1}` : 'Nom du groupe';
-    $('boardTextLabel').textContent = isNote ? 'Commentaire' : 'Groupe';
-    $('boardText').maxLength = isNote ? 1200 : 32;
+    $('boardEditorTitle').textContent = isNote ? `Note ${mark ? notes.indexOf(mark) + 1 : notes.length + 1}`
+      : type === 'text' ? 'Texte sur le tableau' : 'Nom du groupe';
+    $('boardTextLabel').textContent = isNote ? 'Commentaire' : type === 'text' ? 'Texte' : 'Groupe';
+    $('boardText').maxLength = type === 'group' ? 32 : 1200;
     $('boardText').value = mark?.text || '';
     $('boardStudentLabel').hidden = !isNote;
     for (const option of $('boardNoteStudent').options) {
@@ -512,7 +720,7 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
     }
     const {type, position, mark} = editing;
     if (!mark && layout.marks.length >= 100) {
-      $('boardError').textContent = 'Le tableau contient déjà 100 notes et groupes.';
+      $('boardError').textContent = 'Le tableau contient déjà 100 éléments de texte et notes.';
       return;
     }
     const previous = layout.marks;
@@ -544,6 +752,7 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
   };
   $('boardCancel').onclick = () => editor.close();
   $('boardAddNote').onclick = () => openEdit('note', {x: 50, y: 50});
+  $('boardAddText').onclick = () => openEdit('text', {x: 50, y: 50});
   $('boardBackground').onchange = event => {
     const previous = layout.background;
     layout.background = event.target.value;
@@ -653,7 +862,7 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
     const file = input.files[0];
     if (!file) return;
     try {
-      if (file.size > 500000) throw Error('Ce fichier est trop volumineux.');
+      if (file.size > 1000000) throw Error('Ce fichier est trop volumineux.');
       const data = JSON.parse(await file.text());
       if (data?.format !== 'mon-tableau-blanc' || data.version !== 1 ||
           !data.board || !Object.hasOwn(BOARD_BACKGROUNDS, data.board.background) ||
@@ -672,4 +881,7 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
   paintFloor();
   showStudents();
   showMarks();
+  paintInk();
+  if (layout.reference) showReference(true);
+  paintReference();
 }
