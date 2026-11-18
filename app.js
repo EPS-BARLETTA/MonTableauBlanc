@@ -69,27 +69,38 @@ function createNamedBoard(group, name, board) {
   group.boards.pop();
 }
 
-function renderBoardDirectory(group) {
+function multipleBoardRoute(group, ids) {
+  return `${classRoute(group)}/tableaux/${ids.join(',')}`;
+}
+
+function renderBoardDirectory(group, showMulti) {
+  const canOpenMultiple = group.boards.length > 1;
   content.innerHTML = `<section class="route">
     <a class="back-link" href="#classes">← Mes classes</a>
     <div class="route-head">
       <h1>${esc(group.name)}</h1>
       <a href="${classRoute(group)}/eleves">Gérer les élèves</a>
     </div>
-    <h2>Tableaux de la classe</h2>
-    <form id="createBoard" class="board-create">
-      <label for="newBoardName">Nom du nouveau tableau</label>
-      <div><input id="newBoardName" maxlength="80" placeholder="Ex. Badminton · séance 2" required>
-        <button class="primary" type="submit">Créer un tableau</button></div>
-    </form>
-    <form id="openBoards">
-      ${group.boards.length > 1 ? '<p>Coche jusqu’à quatre tableaux pour les ouvrir ensemble.</p>' : ''}
-      <div class="class-grid">${group.boards.map(board => `<div class="board-directory-card">
-        <a href="${boardRoute(group, board)}">${esc(board.name)}</a>
-        ${group.boards.length > 1 ? `<input type="checkbox" name="boards" value="${esc(board.id)}" aria-label="Sélectionner ${esc(board.name)}">` : ''}
-      </div>`).join('')}</div>
-      ${group.boards.length > 1 ? '<button id="openSelected" class="primary" disabled>Ouvrir la sélection</button>' : ''}
-    </form>
+    <section class="multi-board-picker" aria-labelledby="multiBoardTitle">
+      <h2 id="multiBoardTitle">Multi-tableaux</h2>
+      ${canOpenMultiple ? `<form id="openBoards">
+        <p>Sélectionne 2 à 4 tableaux pour les afficher sur la même page.</p>
+        <div class="class-grid">${group.boards.map(board => `<label class="board-directory-card board-choice">
+          <input type="checkbox" name="boards" value="${esc(board.id)}" ${group.boards.length === 2 ? 'checked' : ''}>
+          <span>${esc(board.name)}</span>
+        </label>`).join('')}</div>
+        <button id="openSelected" class="primary">Ouvrir les tableaux ensemble</button>
+      </form>` : `<p>${group.boards.length === 1 ? 'Tu as un tableau dans cette classe. Crée le deuxième pour les ouvrir ensemble.' : 'Crée deux tableaux dans cette classe pour les ouvrir ensemble.'}</p>`}
+      <form id="createBoard" class="board-create">
+        <label for="newBoardName">Nom du nouveau tableau</label>
+        <div><input id="newBoardName" maxlength="80" placeholder="Ex. Badminton · séance 2" required>
+          <button type="submit" class="${canOpenMultiple ? '' : 'primary'}">${group.boards.length === 1 ? 'Créer et ouvrir les deux tableaux' : 'Créer un tableau'}</button></div>
+      </form>
+    </section>
+    <h2 class="single-board-title">Tableaux de la classe</h2>
+    <div class="class-grid">${group.boards.map(board => `<div class="board-directory-card">
+      <a href="${boardRoute(group, board)}">${esc(board.name)}</a>
+    </div>`).join('')}</div>
   </section>`;
   const input = $('newBoardName');
   $('createBoard').onsubmit = event => {
@@ -97,20 +108,29 @@ function renderBoardDirectory(group) {
     const name = input.value.trim();
     if (!name) { input.focus(); return; }
     const board = createNamedBoard(group, name);
-    if (board) location.hash = boardRoute(group, board);
+    if (!board) return;
+    location.hash = !canOpenMultiple && group.boards.length === 2
+      ? multipleBoardRoute(group, group.boards.map(item => item.id))
+      : boardRoute(group, board);
   };
   const selection = $('openBoards');
+  if (!selection) {
+    if (showMulti) input.focus({preventScroll: true});
+    return;
+  }
   const checks = [...selection.querySelectorAll('input')];
-  selection.onchange = () => {
+  function refreshSelection() {
     const count = checks.filter(check => check.checked).length;
-    $('openSelected').disabled = count === 0;
+    $('openSelected').disabled = count < 2;
     checks.forEach(check => { check.disabled = count === 4 && !check.checked; });
-  };
+  }
+  refreshSelection();
+  selection.onchange = refreshSelection;
+  if (showMulti) (group.boards.length === 2 ? $('openSelected') : checks[0]).focus({preventScroll: true});
   selection.onsubmit = event => {
     event.preventDefault();
     const selected = checks.filter(check => check.checked).map(check => check.value);
-    if (selected.length === 1) location.hash = boardRoute(group, {id: selected[0]});
-    if (selected.length > 1) location.hash = `${classRoute(group)}/tableaux/${selected.join(',')}`;
+    if (selected.length >= 2 && selected.length <= 4) location.hash = multipleBoardRoute(group, selected);
   };
 }
 
@@ -120,7 +140,10 @@ function renderOpenBoards(group, boards) {
   content.innerHTML = `<div class="class-nav">
     <a href="${classRoute(group)}">← Tableaux de ${esc(group.name)}</a>
     <h1>${esc(multiple ? group.name : boards[0].name)}</h1>
-    <a href="${classRoute(group)}/eleves">Gérer les élèves</a>
+    <div class="class-nav-actions">
+      <a class="action primary" href="${classRoute(group)}/multi">${multiple ? 'Choisir les tableaux' : 'Multi-tableaux'}</a>
+      <a href="${classRoute(group)}/eleves">Gérer les élèves</a>
+    </div>
   </div><div class="open-boards${multiple ? ' open-boards-multiple' : ''}"></div>`;
   const grid = content.querySelector('.open-boards');
   for (const board of boards) {
@@ -266,7 +289,7 @@ function render() {
         : subpage === 'tableau' ? [boardId] : [];
       const boards = group.boards.filter(board => ids.includes(board.id));
       if (boards.length) renderOpenBoards(group, boards);
-      else renderBoardDirectory(group);
+      else renderBoardDirectory(group, subpage === 'multi');
     }
   } else {
     renderMenu();

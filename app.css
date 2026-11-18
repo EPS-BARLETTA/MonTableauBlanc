@@ -126,6 +126,13 @@ dialog textarea { margin-block: 6px; }
 .board-directory-card { display: flex; align-items: center; gap: 10px; padding: 4px 12px; border: 1px solid var(--line); border-radius: 8px; background: white; }
 .board-directory-card a { flex: 1; align-content: center; min-height: 44px; overflow-wrap: anywhere; font-weight: 700; }
 #openSelected { margin-top: 12px; }
+.multi-board-picker { padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: #edf4e9; }
+.multi-board-picker p { margin-block: 8px 12px; }
+.multi-board-picker .board-create { margin: 14px 0 0; }
+.board-choice { min-height: 48px; cursor: pointer; font-weight: 650; overflow-wrap: anywhere; }
+.board-choice:has(input:checked) { border-color: var(--accent); }
+.single-board-title { margin-block: 20px 10px; }
+.class-nav-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 input[type="checkbox"] { min-height: 0; width: 22px; height: 22px; flex: none; accent-color: var(--accent); }
 .open-boards { display: grid; gap: 14px; }
 @media (min-width: 720px) {
