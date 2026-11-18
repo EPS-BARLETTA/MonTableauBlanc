@@ -62,6 +62,13 @@ function boardRoute(group, board) {
   return `${classRoute(group)}/tableau/${board.id}`;
 }
 
+function createNamedBoard(group, name, board) {
+  const entry = {id: uid(), name, board};
+  group.boards.push(entry);
+  if (save()) return entry;
+  group.boards.pop();
+}
+
 function renderBoardDirectory(group) {
   content.innerHTML = `<section class="route">
     <a class="back-link" href="#classes">← Mes classes</a>
@@ -75,19 +82,53 @@ function renderBoardDirectory(group) {
       <div><input id="newBoardName" maxlength="80" placeholder="Ex. Badminton · séance 2" required>
         <button class="primary" type="submit">Créer un tableau</button></div>
     </form>
-    <div class="class-grid">${group.boards.map(board => `<a class="menu-card" href="${boardRoute(group, board)}">
-      <h2>${esc(board.name)}</h2></a>`).join('')}</div>
+    <form id="openBoards">
+      ${group.boards.length > 1 ? '<p>Coche jusqu’à quatre tableaux pour les ouvrir ensemble.</p>' : ''}
+      <div class="class-grid">${group.boards.map(board => `<div class="board-directory-card">
+        <a href="${boardRoute(group, board)}">${esc(board.name)}</a>
+        ${group.boards.length > 1 ? `<input type="checkbox" name="boards" value="${esc(board.id)}" aria-label="Sélectionner ${esc(board.name)}">` : ''}
+      </div>`).join('')}</div>
+      ${group.boards.length > 1 ? '<button id="openSelected" class="primary" disabled>Ouvrir la sélection</button>' : ''}
+    </form>
   </section>`;
   const input = $('newBoardName');
   $('createBoard').onsubmit = event => {
     event.preventDefault();
     const name = input.value.trim();
     if (!name) { input.focus(); return; }
-    const board = {id: uid(), name};
-    group.boards.push(board);
-    if (!save()) { group.boards.pop(); return; }
-    location.hash = boardRoute(group, board);
+    const board = createNamedBoard(group, name);
+    if (board) location.hash = boardRoute(group, board);
   };
+  const selection = $('openBoards');
+  const checks = [...selection.querySelectorAll('input')];
+  selection.onchange = () => {
+    const count = checks.filter(check => check.checked).length;
+    $('openSelected').disabled = count === 0;
+    checks.forEach(check => { check.disabled = count === 4 && !check.checked; });
+  };
+  selection.onsubmit = event => {
+    event.preventDefault();
+    const selected = checks.filter(check => check.checked).map(check => check.value);
+    if (selected.length === 1) location.hash = boardRoute(group, {id: selected[0]});
+    if (selected.length > 1) location.hash = `${classRoute(group)}/tableaux/${selected.join(',')}`;
+  };
+}
+
+function renderOpenBoards(group, boards) {
+  const students = [...group.students].sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+  const multiple = boards.length > 1;
+  content.innerHTML = `<div class="class-nav">
+    <a href="${classRoute(group)}">← Tableaux de ${esc(group.name)}</a>
+    <h1>${esc(multiple ? group.name : boards[0].name)}</h1>
+    <a href="${classRoute(group)}/eleves">Gérer les élèves</a>
+  </div><div class="open-boards${multiple ? ' open-boards-multiple' : ''}"></div>`;
+  const grid = content.querySelector('.open-boards');
+  for (const board of boards) {
+    const container = document.createElement('div');
+    grid.append(container);
+    renderClassBoard(board, students, group.id, container, multiple,
+      (name, layout) => createNamedBoard(group, name, layout));
+  }
 }
 
 function renderMenu() {
@@ -103,7 +144,7 @@ function renderMenu() {
 function renderDirectory() {
   content.innerHTML = `<section class="route">
     <div class="route-head"><h1>Mes classes</h1><a class="primary action" href="#creer">Créer une classe</a></div>
-    ${classes.length ? `<div class="class-grid">${classes.map(group => `<a class="menu-card" href="${classRoute(group)}">
+    ${classes.length ? `<div class="class-grid">${classes.map(group => `<a class="menu-card class-tile" href="${classRoute(group)}">
       <h2>${esc(group.name)}</h2><p>${group.students.length} élève${group.students.length === 1 ? '' : 's'} · ${group.boards.length} tableau${group.boards.length === 1 ? '' : 'x'}</p>
     </a>`).join('')}</div>` : '<p>Aucune classe pour le moment. Tu peux en créer une avec ton trombinoscope.</p>'}
   </section>`;
@@ -221,17 +262,11 @@ function render() {
     } else if (subpage === 'eleves') {
       renderClassForm(group);
     } else {
-      const board = subpage === 'tableau' && group.boards.find(item => item.id === boardId);
-      if (!board) {
-        renderBoardDirectory(group);
-        return;
-      }
-      const students = [...group.students].sort((a, b) => a.name.localeCompare(b.name, 'fr'));
-      renderClassBoard(board, students, group.id);
-      const bar = document.createElement('div');
-      bar.className = 'class-nav';
-      bar.innerHTML = `<a href="${classRoute(group)}">← Tableaux de ${esc(group.name)}</a><h1>${esc(board.name)}</h1><a href="${classRoute(group)}/eleves">Gérer les élèves</a>`;
-      content.prepend(bar);
+      const ids = subpage === 'tableaux' ? (boardId || '').split(',').slice(0, 4)
+        : subpage === 'tableau' ? [boardId] : [];
+      const boards = group.boards.filter(board => ids.includes(board.id));
+      if (boards.length) renderOpenBoards(group, boards);
+      else renderBoardDirectory(group);
     }
   } else {
     renderMenu();

@@ -119,3 +119,15 @@ dialog textarea { margin-block: 6px; }
 .board-create label { margin-bottom: 5px; }
 .board-create div { display: flex; flex-wrap: wrap; gap: 8px; }
 .board-create input { min-width: 0; flex: 0 1 300px; }
+.class-grid { grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 10px; }
+.class-tile { border-radius: 8px; padding: 14px 16px; border-left: 4px solid var(--accent); overflow-wrap: anywhere; }
+.class-tile h2 { font-size: 21px; }
+.class-tile p { margin-top: 4px; }
+.board-directory-card { display: flex; align-items: center; gap: 10px; padding: 4px 12px; border: 1px solid var(--line); border-radius: 8px; background: white; }
+.board-directory-card a { flex: 1; align-content: center; min-height: 44px; overflow-wrap: anywhere; font-weight: 700; }
+#openSelected { margin-top: 12px; }
+input[type="checkbox"] { min-height: 0; width: 22px; height: 22px; flex: none; accent-color: var(--accent); }
+.open-boards { display: grid; gap: 14px; }
+@media (min-width: 720px) {
+  .open-boards-multiple { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
