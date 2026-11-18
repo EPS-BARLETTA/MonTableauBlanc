@@ -62,6 +62,8 @@ function normalizeBoard(raw, studentIds) {
     ladderCourts: boardClamp(Math.round(Number(raw.ladderCourts)) || 6, 1, 12),
     positions,
     studentIds: Array.isArray(raw.studentIds) ? [...new Set(raw.studentIds.filter(id => roster.has(id)))] : null,
+    absentIds: Array.isArray(raw.absentIds) ? [...new Set(raw.absentIds.filter(id => roster.has(id)))] : [],
+    groups: boardClamp(Math.floor(Number(raw.groups)) || 0, 0, 80),
     ink: Array.isArray(raw.ink) ? raw.ink.slice(0, BOARD_INK_STROKES).filter(line =>
       typeof line === 'string' && line.length <= BOARD_INK_POINTS * 10 &&
       /^(?:\d{1,4},\d{1,4})(?: \d{1,4},\d{1,4})*$/.test(line)) : [],
@@ -93,6 +95,7 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
         `<option value="${key}" ${key === background ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
       <label id="boardCountLabel">Terrains<select id="boardCourtCount"></select></label>
       <button id="boardChooseStudents">Élèves du tableau</button><button id="boardAddNote">Ajouter une note</button><button id="boardArchives">Enregistrer</button><button id="boardExpand" aria-pressed="false">Plein écran</button>
+      <button id="boardAttendance">Faire l’appel</button><button id="boardDistribute">Répartir les présents</button>
     </div>
     <div class="board-writing">
       <button id="boardDraw" aria-pressed="false">Écrire au Pencil</button>
@@ -104,6 +107,7 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
     <p id="boardLadderHelp" class="muted board-ladder-help" hidden>Terrain 1 en haut. Les gagnants montent vers le terrain précédent et les perdants descendent vers le suivant. Déplace les élèves à la main.</p>
     <div id="boardWorkspace" class="board-workspace"><div id="boardSurface" class="board-surface" role="region" aria-label="Tableau de ${esc(group.name)}">
       <div id="boardFloor" class="board-floor" aria-hidden="true"></div>
+      <div id="boardGroupZones" class="board-group-zones" hidden></div>
       <svg id="boardInk" class="board-ink" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true"></svg>
     </div>
     <aside class="board-notes" aria-labelledby="boardNotesTitle">
@@ -120,6 +124,25 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
       <p id="boardReferenceStatus" role="status"></p>
       <div id="boardReferencePreview"></div>
     </aside></div>
+    <dialog id="boardAttendanceDialog" aria-labelledby="boardAttendanceTitle">
+      <h2 id="boardAttendanceTitle">Faire l’appel</h2>
+      <form id="boardAttendanceForm">
+        <p>Coche les absents de la classe pour ce tableau.</p>
+        <div id="boardAttendanceList" class="board-roster-list"></div>
+        <div class="actions"><button id="boardAttendanceCancel" type="button">Annuler</button><button class="primary">Enregistrer l’appel</button></div>
+      </form>
+    </dialog>
+    <dialog id="boardDistributionDialog" aria-labelledby="boardDistributionTitle">
+      <h2 id="boardDistributionTitle">Répartir les présents</h2>
+      <form id="boardDistributionForm">
+        <p id="boardDistributionStatus" role="status"></p>
+        <label id="boardGroupSizeLabel">Élèves par groupe au maximum
+          <input id="boardGroupSize" type="number" min="2" max="12" value="4" required>
+        </label>
+        <label class="board-check"><input id="boardMix" type="checkbox"> Mélanger les élèves</label>
+        <div class="actions"><button id="boardDistributionCancel" type="button">Annuler</button><button id="boardApplyDistribution" class="primary">Répartir</button></div>
+      </form>
+    </dialog>
     <dialog id="boardRosterDialog" aria-labelledby="boardRosterTitle">
       <h2 id="boardRosterTitle">Élèves · ${esc(group.name)}</h2>
       <form id="boardRosterForm">
@@ -197,11 +220,14 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
     }
   });
   const floor = $('boardFloor');
+  const groupZones = $('boardGroupZones');
   const editor = $('boardEditor');
   const cards = new Map();
   const markElements = new Map();
   const portraitDialog = $('boardPortraitDialog');
   const isLadder = () => ['badminton', 'pickleball'].includes(layout.background);
+  const hasCourts = () => !['blank', 'scale'].includes(layout.background);
+  const numberOfCourts = () => isLadder() ? layout.ladderCourts : layout.courts;
   let gesture, pendingTap, editing, highlightedStudent;
 
   function showPortrait(student) {
@@ -213,9 +239,9 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
   }
 
   function paintFloor() {
-    const sport = !['blank', 'scale'].includes(layout.background);
+    const sport = hasCourts();
     const ladder = isLadder();
-    const count = ladder ? layout.ladderCourts : layout.courts;
+    const count = numberOfCourts();
     $('boardCountLabel').hidden = !sport;
     $('boardLadderHelp').hidden = !ladder;
     $('boardCourtCount').replaceChildren(...Array.from({length: ladder ? 12 : 4}, (_, index) => new Option(index + 1, index + 1)));
@@ -232,6 +258,18 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
     } else {
       floor.replaceChildren();
     }
+    groupZones.hidden = sport || !layout.groups;
+    if (groupZones.hidden) {
+      groupZones.replaceChildren();
+      return;
+    }
+    const columns = Math.min(5, Math.ceil(Math.sqrt(layout.groups)));
+    groupZones.style.gridTemplateColumns = `repeat(${columns}, minmax(0, 1fr))`;
+    groupZones.replaceChildren(...Array.from({length: layout.groups}, (_, index) => {
+      const zone = document.createElement('div');
+      zone.textContent = `Groupe ${index + 1}`;
+      return zone;
+    }));
   }
 
   function writeBoard() {
@@ -487,12 +525,19 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
 
   const columns = matchMedia('(max-width: 640px)').matches ? 4 : 7;
   const rows = Math.ceil(students.length / columns);
+  function presentStudents() {
+    const visible = layout.studentIds && new Set(layout.studentIds);
+    const absent = new Set(layout.absentIds);
+    return students.filter(student => (!visible || visible.has(student.id)) && !absent.has(student.id));
+  }
+
   function showStudents() {
     cards.forEach(({element}) => element.remove());
     cards.clear();
-    const visible = layout.studentIds && new Set(layout.studentIds);
+    const present = new Set(presentStudents().map(student => student.id));
+    $('boardAttendance').textContent = layout.absentIds.length ? `Appel · ${layout.absentIds.length} absent(s)` : 'Faire l’appel';
     students.forEach((student, index) => {
-      if (visible && !visible.has(student.id)) return;
+      if (!present.has(student.id)) return;
       const element = document.createElement('button');
       element.type = 'button';
       element.className = 'board-student';
@@ -521,17 +566,19 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
     });
   }
 
-  const rosterDialog = $('boardRosterDialog');
-  const rosterList = $('boardRosterList');
-  const rosterChecks = students.map(student => {
+  function makeStudentChecks(list) {
+    return students.map(student => {
     const label = document.createElement('label');
     const check = document.createElement('input');
     check.type = 'checkbox';
     check.value = student.id;
     label.append(check, RosterPortraits.photo(student.portrait), document.createTextNode(student.name));
-    rosterList.append(label);
+    list.append(label);
     return check;
-  });
+    });
+  }
+  const rosterDialog = $('boardRosterDialog');
+  const rosterChecks = makeStudentChecks($('boardRosterList'));
   $('boardChooseStudents').onclick = () => {
     const chosen = layout.studentIds && new Set(layout.studentIds);
     rosterChecks.forEach(check => { check.checked = !chosen || chosen.has(check.value); });
@@ -549,6 +596,78 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
     showStudents();
     showMarks();
     rosterDialog.close();
+  };
+
+  const attendance = $('boardAttendanceDialog');
+  const attendanceChecks = makeStudentChecks($('boardAttendanceList'));
+  $('boardAttendance').onclick = () => {
+    const absent = new Set(layout.absentIds);
+    attendanceChecks.forEach(check => { check.checked = absent.has(check.value); });
+    attendance.showModal();
+  };
+  $('boardAttendanceCancel').onclick = () => attendance.close();
+  $('boardAttendanceForm').onsubmit = event => {
+    event.preventDefault();
+    const previous = layout.absentIds;
+    layout.absentIds = attendanceChecks.filter(check => check.checked).map(check => check.value);
+    if (!writeBoard()) { layout.absentIds = previous; return; }
+    showStudents();
+    showMarks();
+    attendance.close();
+  };
+
+  const distribution = $('boardDistributionDialog');
+  const distributionStatus = $('boardDistributionStatus');
+  const groupSize = $('boardGroupSize');
+  $('boardDistribute').onclick = () => {
+    const count = presentStudents().length;
+    distributionStatus.textContent = count ? `${count} élève(s) présent(s) sur ce tableau` +
+      (hasCourts() ? ` · ${numberOfCourts()} terrain(s).` : '.') : 'Aucun élève présent sur ce tableau.';
+    $('boardGroupSizeLabel').hidden = hasCourts();
+    groupSize.disabled = hasCourts();
+    $('boardApplyDistribution').disabled = !count;
+    distribution.showModal();
+  };
+  $('boardDistributionCancel').onclick = () => distribution.close();
+  $('boardDistributionForm').onsubmit = event => {
+    event.preventDefault();
+    const present = presentStudents();
+    if (!present.length) return;
+    if ($('boardMix').checked) {
+      for (let i = present.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [present[i], present[j]] = [present[j], present[i]];
+      }
+    }
+    const previous = {positions: layout.positions, groups: layout.groups};
+    layout.groups = hasCourts() ? 0 : Math.ceil(present.length / groupSize.valueAsNumber);
+    paintFloor();
+    const zones = hasCourts() ? [...floor.children] : [...groupZones.children];
+    const bounds = surface.getBoundingClientRect();
+    layout.positions = {...previous.positions};
+    let start = 0;
+    zones.forEach((zone, index) => {
+      const count = Math.floor(present.length / zones.length) + (index < present.length % zones.length ? 1 : 0);
+      if (!count) return;
+      const box = zone.getBoundingClientRect();
+      const columns = Math.min(count, Math.max(1, Math.floor(box.width / 65)));
+      const rows = Math.ceil(count / columns);
+      for (let i = 0; i < count; i++) {
+        const x = box.left - bounds.left + (i % columns + .5) * box.width / columns;
+        const y = box.top - bounds.top + 24 + (Math.floor(i / columns) + .5) * Math.max(1, box.height - 24) / rows;
+        layout.positions[present[start + i].id] = {x: 100 * x / bounds.width, y: 100 * y / bounds.height};
+      }
+      start += count;
+    });
+    if (!writeBoard()) {
+      Object.assign(layout, previous);
+      paintFloor();
+      distributionStatus.textContent = 'La répartition n’a pas été enregistrée.';
+      return;
+    }
+    showStudents();
+    showMarks();
+    distribution.close();
   };
 
   function showMarks() {

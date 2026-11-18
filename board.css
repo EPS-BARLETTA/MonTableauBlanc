@@ -28,6 +28,10 @@
   -webkit-touch-callout: none;
 }
 .board-floor { position: absolute; inset: 0; pointer-events: none; }
+.board-group-zones { position: absolute; inset: 0; display: grid; grid-auto-rows: minmax(0, 1fr); gap: 6px; padding: 8px; pointer-events: none; }
+.board-group-zones > div { min-width: 0; border: 1px solid #a8c3bb; border-radius: 8px; background: #e9f4eea8; padding: 5px 8px; font-size: 12px; font-weight: 700; }
+.board-check { display: flex; align-items: center; gap: 8px; margin-block: 12px; }
+.board-check input { margin: 0; }
 .board-floor:not(.board-blank):not(.board-scale) {
   display: grid;
   padding: 18px;
