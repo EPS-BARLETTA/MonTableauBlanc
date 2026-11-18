@@ -88,6 +88,7 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
   container.innerHTML = `<section class="card class-board" aria-label="${esc(group.name)}">
     <div class="board-heading">
       ${multiple ? `<h2 class="board-title">${esc(group.name)}</h2>` : ''}
+      <button id="boardAttendance" class="board-attendance">Appel · 0 absent</button>
       <button id="boardCloseView" type="button" aria-label="Fermer ${esc(group.name)}">Fermer</button>
     </div>
     <div class="board-toolbar">
@@ -95,13 +96,16 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
         `<option value="${key}" ${key === background ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
       <label id="boardCountLabel">Terrains<select id="boardCourtCount"></select></label>
       <button id="boardChooseStudents">Élèves du tableau</button><button id="boardAddNote">Ajouter une note</button><button id="boardArchives">Enregistrer</button><button id="boardExpand" aria-pressed="false">Plein écran</button>
-      <button id="boardAttendance">Faire l’appel</button><button id="boardDistribute">Répartir les présents</button>
+      <button id="boardDistribute">Répartir les présents</button>
     </div>
     <div class="board-writing">
-      <button id="boardDraw" aria-pressed="false">Écrire au Pencil</button>
-      <button id="boardUndoInk" disabled>Annuler le dernier trait</button>
-      <button id="boardAddText">Ajouter du texte</button>
-      <button id="boardReferenceToggle" aria-pressed="false">Barème ou critères</button>
+      <button id="boardAddText">Texte / Pencil</button>
+      <button id="boardReferenceToggle">Barème ou critères</button>
+      <details class="board-drawing-tools">
+        <summary>Dessin libre</summary>
+        <button id="boardDraw" aria-pressed="false">Tracer sur le tableau</button>
+        <button id="boardUndoInk" disabled>Annuler le dernier trait</button>
+      </details>
     </div>
     <p class="muted board-help">Glisse les portraits librement. Double-touche ou double-clique sur un élève pour l’agrandir. Appuie longuement sur un espace libre pour ajouter une note. Glisse une note sur un portrait pour les associer.</p>
     <p id="boardLadderHelp" class="muted board-ladder-help" hidden>Terrain 1 en haut. Les gagnants montent vers le terrain précédent et les perdants descendent vers le suivant. Déplace les élèves à la main.</p>
@@ -113,24 +117,23 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
     <aside class="board-notes" aria-labelledby="boardNotesTitle">
       <h2 id="boardNotesTitle">Notes <span id="boardNoteCount">0</span></h2>
       <ol id="boardNoteList"></ol>
-    </aside>
-    <aside id="boardReference" class="board-reference" aria-labelledby="boardReferenceTitle" hidden>
+    </aside></div>
+    <dialog id="boardReference" class="board-reference" aria-labelledby="boardReferenceTitle">
       <h2 id="boardReferenceTitle">Barème ou critères</h2>
       <div class="board-reference-actions">
         <button id="boardImportReference">Importer un document</button>
         <button id="boardRemoveReference" hidden>Retirer</button>
+        <button id="boardReferenceClose" class="primary">Revenir au tableau</button>
         <input id="boardReferenceFile" type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" hidden>
       </div>
       <p id="boardReferenceStatus" role="status"></p>
       <div id="boardReferencePreview"></div>
-    </aside></div>
+    </dialog>
     <dialog id="boardAttendanceDialog" aria-labelledby="boardAttendanceTitle">
       <h2 id="boardAttendanceTitle">Faire l’appel</h2>
-      <form id="boardAttendanceForm">
-        <p>Coche les absents de la classe pour ce tableau.</p>
-        <div id="boardAttendanceList" class="board-roster-list"></div>
-        <div class="actions"><button id="boardAttendanceCancel" type="button">Annuler</button><button class="primary">Enregistrer l’appel</button></div>
-      </form>
+      <p id="boardAttendanceStatus" role="status"></p>
+      <div id="boardAttendanceList" class="board-roster-list"></div>
+      <div class="actions"><button id="boardAttendanceDone" class="primary">Terminé</button></div>
     </dialog>
     <dialog id="boardDistributionDialog" aria-labelledby="boardDistributionTitle">
       <h2 id="boardDistributionTitle">Répartir les présents</h2>
@@ -177,6 +180,7 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
     <dialog id="boardEditor" aria-labelledby="boardEditorTitle">
       <form id="boardForm">
         <h2 id="boardEditorTitle"></h2>
+        <p id="boardScribbleHint" class="muted" hidden>Sur iPad, écris au Pencil dans la zone ci-dessous avec Griffonner, ou saisis ton texte au clavier.</p>
       <label id="boardTextLabel" for="boardText"></label><textarea id="boardText" rows="4" maxlength="1200" required></textarea>
         <label id="boardStudentLabel">Associer à un élève<select id="boardNoteStudent">
           <option value="">Note libre</option>
@@ -307,12 +311,12 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
 
   draw.onclick = () => {
     const active = ink.classList.toggle('board-ink-active');
-    draw.textContent = active ? 'Terminer l’écriture' : 'Écrire au Pencil';
+    draw.textContent = active ? 'Terminer le dessin' : 'Tracer sur le tableau';
     draw.setAttribute('aria-pressed', String(active));
   };
   ink.addEventListener('pointerdown', event => {
     event.stopPropagation();
-    if (event.button !== 0 || stroke || event.pointerType === 'touch') return;
+    if (event.button !== 0 || stroke) return;
     if (layout.ink.length >= BOARD_INK_STROKES) {
       notify('Ce tableau contient déjà 100 traits. Annule le dernier trait pour continuer.');
       return;
@@ -378,13 +382,8 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
     }
   }
 
-  function showReference(open) {
-    referencePanel.hidden = !open;
-    workspace.classList.toggle('board-with-reference', open);
-    referenceToggle.setAttribute('aria-pressed', String(open));
-  }
-
-  referenceToggle.onclick = () => showReference(referencePanel.hidden);
+  referenceToggle.onclick = () => referencePanel.showModal();
+  $('boardReferenceClose').onclick = () => referencePanel.close();
   importReference.onclick = () => referenceFile.click();
   referenceFile.onchange = async () => {
     const file = referenceFile.files[0];
@@ -535,7 +534,8 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
     cards.forEach(({element}) => element.remove());
     cards.clear();
     const present = new Set(presentStudents().map(student => student.id));
-    $('boardAttendance').textContent = layout.absentIds.length ? `Appel · ${layout.absentIds.length} absent(s)` : 'Faire l’appel';
+    const count = layout.absentIds.length;
+    $('boardAttendance').textContent = `Appel · ${count} absent${count > 1 ? 's' : ''}`;
     students.forEach((student, index) => {
       if (!present.has(student.id)) return;
       const element = document.createElement('button');
@@ -600,20 +600,28 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
 
   const attendance = $('boardAttendanceDialog');
   const attendanceChecks = makeStudentChecks($('boardAttendanceList'));
-  $('boardAttendance').onclick = () => {
+  function refreshAttendance() {
     const absent = new Set(layout.absentIds);
     attendanceChecks.forEach(check => { check.checked = absent.has(check.value); });
+    $('boardAttendanceStatus').textContent = `Coche les absents · ${absent.size} absent${absent.size > 1 ? 's' : ''} sur ${students.length}`;
+  }
+  $('boardAttendance').onclick = () => {
+    refreshAttendance();
     attendance.showModal();
   };
-  $('boardAttendanceCancel').onclick = () => attendance.close();
-  $('boardAttendanceForm').onsubmit = event => {
-    event.preventDefault();
+  $('boardAttendanceDone').onclick = () => attendance.close();
+  $('boardAttendanceList').onchange = () => {
     const previous = layout.absentIds;
     layout.absentIds = attendanceChecks.filter(check => check.checked).map(check => check.value);
-    if (!writeBoard()) { layout.absentIds = previous; return; }
+    if (!writeBoard()) {
+      layout.absentIds = previous;
+      refreshAttendance();
+      $('boardAttendanceStatus').textContent = 'Impossible d’enregistrer l’appel. Réessaie.';
+      return;
+    }
     showStudents();
     showMarks();
-    attendance.close();
+    refreshAttendance();
   };
 
   const distribution = $('boardDistributionDialog');
@@ -817,6 +825,7 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
     $('boardEditorTitle').textContent = isNote ? `Note ${mark ? notes.indexOf(mark) + 1 : notes.length + 1}`
       : type === 'text' ? 'Texte sur le tableau' : 'Nom du groupe';
     $('boardTextLabel').textContent = isNote ? 'Commentaire' : type === 'text' ? 'Texte' : 'Groupe';
+    $('boardScribbleHint').hidden = type !== 'text';
     $('boardText').maxLength = type === 'group' ? 32 : 1200;
     $('boardText').value = mark?.text || '';
     $('boardStudentLabel').hidden = !isNote;
@@ -1001,6 +1010,5 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
   showStudents();
   showMarks();
   paintInk();
-  if (layout.reference) showReference(true);
   paintReference();
 }

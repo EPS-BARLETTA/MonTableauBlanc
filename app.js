@@ -78,12 +78,25 @@ function openBoardView(group, boards) {
   else location.hash = classRoute(group);
 }
 
+function rememberSession(group, boards) {
+  const previous = group.sessionBoards;
+  const ids = boards.map(board => board.id);
+  if (JSON.stringify(previous) === JSON.stringify(ids)) return true;
+  group.sessionBoards = ids;
+  if (save()) return true;
+  group.sessionBoards = previous;
+  return false;
+}
+
 function renderBoardDirectory(group) {
+  const session = (group.sessionBoards || []).map(id => group.boards.find(board => board.id === id)).filter(Boolean);
+  const resume = session.length ? session : group.boards.slice(0, MAX_OPEN_BOARDS);
   content.innerHTML = `<section class="route">
     <a class="back-link" href="#classes">← Mes classes</a>
     <div class="route-head">
       <h1>${esc(group.name)}</h1>
       <div class="class-nav-actions">
+        ${resume.length > 1 || session.length ? `<button id="resumeSession" class="primary" type="button">${session.length ? 'Reprendre la séance' : 'Ouvrir les tableaux ensemble'} · ${resume.length}</button>` : ''}
         <a href="${classRoute(group)}/eleves">Élèves et trombinoscope</a>
         <button id="newBoard" class="primary" type="button">+ Nouveau tableau</button>
       </div>
@@ -106,6 +119,8 @@ function renderBoardDirectory(group) {
     </dialog>
   </section>`;
   const dialog = $('newBoardDialog');
+  const resumeButton = $('resumeSession');
+  if (resumeButton) resumeButton.onclick = () => openBoardView(group, resume);
   const input = $('newBoardName');
   $('newBoard').onclick = () => dialog.showModal();
   $('cancelNewBoard').onclick = () => dialog.close();
@@ -139,6 +154,8 @@ function renderOpenBoards(group, boards) {
     <a href="${classRoute(group)}">← Tableaux de ${esc(group.name)}</a>
     <h1>${esc(multiple ? group.name : boards[0].name)}</h1>
     <div class="class-nav-actions">
+      <button id="saveSession" type="button">Enregistrer la séance</button>
+      <button id="captureSession" type="button">Capture PNG</button>
       ${canAddBoard ? '<button id="addOpenBoard" class="primary" type="button">+ Ajouter un tableau</button>' : '<span class="muted">4 tableaux ouverts</span>'}
       ${canAddBoard && available.length ? `<select id="openSavedBoard" aria-label="Ouvrir un tableau enregistré">
         <option value="">Ouvrir un tableau enregistré</option>
@@ -147,6 +164,10 @@ function renderOpenBoards(group, boards) {
       <a href="${classRoute(group)}/eleves">Gérer les élèves</a>
     </div>
   </div><div class="open-boards${multiple ? ' open-boards-multiple' : ''}"></div>`;
+  if (multiple) rememberSession(group, boards);
+  $('saveSession').onclick = () => {
+    if (rememberSession(group, boards)) notify('Séance enregistrée. Retrouve-la depuis la page de la classe.');
+  };
   if (canAddBoard) {
     $('addOpenBoard').onclick = event => {
       let number = group.boards.length + 1;
@@ -166,6 +187,18 @@ function renderOpenBoards(group, boards) {
     };
   }
   const grid = content.querySelector('.open-boards');
+  $('captureSession').onclick = async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      const image = await captureBoardSession(grid, group.name, boards.map(board => board.name));
+      download(`Seance-${group.name.replace(/[^a-z0-9_-]/gi, '_')}-${today()}.png`, image, 'image/png');
+    } catch {
+      notify('La capture PNG n’a pas pu être créée.');
+    } finally {
+      button.disabled = false;
+    }
+  };
   for (const board of boards) {
     const container = document.createElement('div');
     grid.append(container);
