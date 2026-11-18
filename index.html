@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#14293e">
+  <meta name="description" content="Un tableau de classe interactif pour organiser les élèves, les terrains et les observations en EPS.">
+  <title>Mon Tableau Blanc</title>
+  <link rel="stylesheet" href="./app.css">
+  <link rel="stylesheet" href="./board.css">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <script defer src="./portraits.js"></script>
+  <script defer src="./board.js"></script>
+  <script defer src="./app.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <a href="#" class="brand">Mon Tableau Blanc</a>
+    <a id="navHome" href="#accueil" hidden>Accueil</a>
+  </header>
+  <main id="content">
+    <section class="cover">
+      <div class="cover-copy">
+        <h1>Mon Tableau Blanc</h1>
+        <p>Place tes élèves sur les terrains, compose tes groupes et garde tes observations à portée de main.</p>
+        <a href="#accueil" class="primary action">Ouvrir mon tableau</a>
+      </div>
+      <div class="cover-art" aria-hidden="true"><div class="cover-court"></div><div class="cover-court"></div></div>
+    </section>
+  </main>
+  <p class="toast" id="appNotice" role="status" hidden></p>
+</body>
+</html>

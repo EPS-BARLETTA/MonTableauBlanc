@@ -1,0 +1,9 @@
+{
+  "name": "Mon Tableau Blanc",
+  "short_name": "Tableau Blanc",
+  "start_url": "./",
+  "display": "standalone",
+  "lang": "fr",
+  "background_color": "#f4f6f0",
+  "theme_color": "#14293e"
+}
