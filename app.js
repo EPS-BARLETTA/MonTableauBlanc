@@ -14,7 +14,11 @@ let canReadStorage = true;
 try {
   const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
   if (!Array.isArray(saved)) throw Error('Format incorrect');
-  classes = saved;
+  classes = saved.map(group => {
+    if (Array.isArray(group.boards)) return group;
+    const {board, boardArchives, ...rest} = group;
+    return {...rest, boards: [{id: 'principal', name: 'Tableau principal', board, boardArchives}]};
+  });
 } catch {
   canReadStorage = false;
 }
@@ -54,6 +58,38 @@ function classRoute(group) {
   return `#classe/${group.id}`;
 }
 
+function boardRoute(group, board) {
+  return `${classRoute(group)}/tableau/${board.id}`;
+}
+
+function renderBoardDirectory(group) {
+  content.innerHTML = `<section class="route">
+    <a class="back-link" href="#classes">← Mes classes</a>
+    <div class="route-head">
+      <h1>${esc(group.name)}</h1>
+      <a href="${classRoute(group)}/eleves">Gérer les élèves</a>
+    </div>
+    <h2>Tableaux de la classe</h2>
+    <form id="createBoard" class="board-create">
+      <label for="newBoardName">Nom du nouveau tableau</label>
+      <div><input id="newBoardName" maxlength="80" placeholder="Ex. Badminton · séance 2" required>
+        <button class="primary" type="submit">Créer un tableau</button></div>
+    </form>
+    <div class="class-grid">${group.boards.map(board => `<a class="menu-card" href="${boardRoute(group, board)}">
+      <h2>${esc(board.name)}</h2></a>`).join('')}</div>
+  </section>`;
+  const input = $('newBoardName');
+  $('createBoard').onsubmit = event => {
+    event.preventDefault();
+    const name = input.value.trim();
+    if (!name) { input.focus(); return; }
+    const board = {id: uid(), name};
+    group.boards.push(board);
+    if (!save()) { group.boards.pop(); return; }
+    location.hash = boardRoute(group, board);
+  };
+}
+
 function renderMenu() {
   content.innerHTML = `<section class="route">
     <h1>Mes tableaux de classe</h1>
@@ -68,7 +104,7 @@ function renderDirectory() {
   content.innerHTML = `<section class="route">
     <div class="route-head"><h1>Mes classes</h1><a class="primary action" href="#creer">Créer une classe</a></div>
     ${classes.length ? `<div class="class-grid">${classes.map(group => `<a class="menu-card" href="${classRoute(group)}">
-      <h2>${esc(group.name)}</h2><p>${group.students.length} élève${group.students.length === 1 ? '' : 's'}</p>
+      <h2>${esc(group.name)}</h2><p>${group.students.length} élève${group.students.length === 1 ? '' : 's'} · ${group.boards.length} tableau${group.boards.length === 1 ? '' : 'x'}</p>
     </a>`).join('')}</div>` : '<p>Aucune classe pour le moment. Tu peux en créer une avec ton trombinoscope.</p>'}
   </section>`;
 }
@@ -76,7 +112,7 @@ function renderDirectory() {
 function renderClassForm(group) {
   const heading = group ? 'Élèves de ' + group.name : 'Créer une classe';
   content.innerHTML = `<section class="route class-form">
-    <a class="back-link" href="${group ? classRoute(group) : '#accueil'}">← ${group ? 'Tableau de classe' : 'Accueil'}</a>
+    <a class="back-link" href="${group ? classRoute(group) : '#accueil'}">← ${group ? 'Tableaux de la classe' : 'Accueil'}</a>
     <h1>${esc(heading)}</h1>
     <form id="classForm" class="card">
       <label for="className">Nom de la classe</label>
@@ -114,7 +150,8 @@ function renderClassForm(group) {
 
   function saveRoster(students) {
     const previous = classes;
-    const updated = {...group, id: group?.id || uid(), name: name.value.trim(), students};
+    const updated = {...group, id: group?.id || uid(), name: name.value.trim(), students,
+      boards: group?.boards || [{id: 'principal', name: 'Tableau principal'}]};
     classes = group ? classes.map(c => c.id === group.id ? updated : c) : [...classes, updated];
     if (!save()) {
       classes = previous;
@@ -169,7 +206,7 @@ function renderClassForm(group) {
 }
 
 function render() {
-  const [page, id, subpage] = location.hash.slice(1).split('/');
+  const [page, id, subpage, boardId] = location.hash.slice(1).split('/');
   $('navHome').hidden = !page || page === 'accueil';
   if (!page) {
     content.innerHTML = cover;
@@ -184,11 +221,16 @@ function render() {
     } else if (subpage === 'eleves') {
       renderClassForm(group);
     } else {
+      const board = subpage === 'tableau' && group.boards.find(item => item.id === boardId);
+      if (!board) {
+        renderBoardDirectory(group);
+        return;
+      }
       const students = [...group.students].sort((a, b) => a.name.localeCompare(b.name, 'fr'));
-      renderClassBoard(group, students);
+      renderClassBoard(board, students, group.id);
       const bar = document.createElement('div');
       bar.className = 'class-nav';
-      bar.innerHTML = `<a href="#classes">← Mes classes</a><h1>${esc(group.name)}</h1><a href="${classRoute(group)}/eleves">Gérer les élèves</a>`;
+      bar.innerHTML = `<a href="${classRoute(group)}">← Tableaux de ${esc(group.name)}</a><h1>${esc(board.name)}</h1><a href="${classRoute(group)}/eleves">Gérer les élèves</a>`;
       content.prepend(bar);
     }
   } else {

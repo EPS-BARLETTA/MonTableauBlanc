@@ -45,7 +45,7 @@ function normalizeBoard(raw, studentIds) {
   };
 }
 
-function renderClassBoard(group, students) {
+function renderClassBoard(group, students, classId) {
   const studentIds = students.map(p => p.id);
   const layout = normalizeBoard(group.board || {}, studentIds);
   const {background} = layout;
@@ -570,7 +570,7 @@ function renderClassBoard(group, students) {
   };
   $('boardDownload').onclick = () => {
     const name = archiveName.value.trim() || `Tableau du ${new Date().toLocaleDateString('fr-FR')}`;
-    const data = {format: 'mon-tableau-blanc', version: 1, classId: group.id, name, board: snapshot()};
+    const data = {format: 'mon-tableau-blanc', version: 1, classId, name, board: snapshot()};
     download(`MonTableauBlanc-${group.name.replace(/[^a-z0-9_-]/gi, '_')}-${today()}.json`, JSON.stringify(data), 'application/json');
   };
   $('boardUpload').onclick = () => $('boardArchiveFile').click();
@@ -584,7 +584,7 @@ function renderClassBoard(group, students) {
       if (data?.format !== 'mon-tableau-blanc' || data.version !== 1 ||
           !data.board || !Object.hasOwn(BOARD_BACKGROUNDS, data.board.background) ||
           typeof data.name !== 'string' || !data.name.trim()) throw Error('Choisis un fichier de tableau Mon Tableau Blanc.');
-      if (data.classId !== group.id) throw Error('Ouvre la classe d’origine pour importer ce tableau.');
+      if (data.classId !== classId) throw Error('Ouvre la classe d’origine pour importer ce tableau.');
       if (addArchive(data.name.trim().slice(0, 80), normalizeBoard(data.board, studentIds))) {
         listArchives();
         archiveStatus.textContent = 'Fichier importé. Choisis « Ouvrir » pour afficher cette copie.';

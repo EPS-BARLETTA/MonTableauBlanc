@@ -114,3 +114,8 @@ dialog textarea { margin-block: 6px; }
   .cover-art { padding: 6% 16% 14%; }
   .class-nav h1 { order: -1; width: 100%; }
 }
+
+.board-create { margin-block: 14px 22px; }
+.board-create label { margin-bottom: 5px; }
+.board-create div { display: flex; flex-wrap: wrap; gap: 8px; }
+.board-create input { min-width: 0; flex: 0 1 300px; }
