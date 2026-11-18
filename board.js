@@ -46,14 +46,17 @@ function normalizeBoard(raw, studentIds) {
   };
 }
 
-function renderClassBoard(group, students, classId, container, multiple, saveAsNewBoard) {
+function renderClassBoard(group, students, classId, container, multiple, saveAsNewBoard, closeBoard) {
   const studentIds = students.map(p => p.id);
   const layout = normalizeBoard(group.board || {}, studentIds);
   const {background} = layout;
   const prefix = 'board-' + group.id + '-';
   const $ = id => document.getElementById(prefix + id);
   container.innerHTML = `<section class="card class-board" aria-label="${esc(group.name)}">
-    ${multiple ? `<h2 class="board-title">${esc(group.name)}</h2>` : ''}
+    <div class="board-heading">
+      ${multiple ? `<h2 class="board-title">${esc(group.name)}</h2>` : ''}
+      <button id="boardCloseView" type="button" aria-label="Fermer ${esc(group.name)}">Fermer</button>
+    </div>
     <div class="board-toolbar">
       <label>Fond<select id="boardBackground">${Object.entries(BOARD_BACKGROUNDS).filter(([key]) => key !== 'tennis' || background === 'tennis').map(([key, label]) =>
         `<option value="${key}" ${key === background ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
@@ -114,6 +117,7 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
     </dialog>
   </section>`.replace(/\b(id|for|aria-labelledby)="(board\w+)"/g, (_, attribute, id) => `${attribute}="${prefix}${id}"`);
   const panel = container.firstElementChild;
+  $('boardCloseView').onclick = closeBoard;
   const surface = $('boardSurface');
   const workspace = $('boardWorkspace');
   const expand = $('boardExpand');

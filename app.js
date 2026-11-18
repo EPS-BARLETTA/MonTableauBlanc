@@ -70,81 +70,78 @@ function createNamedBoard(group, name, board) {
   group.boards.pop();
 }
 
-function multipleBoardRoute(group, ids) {
-  return `${classRoute(group)}/tableaux/${ids.join(',')}`;
+function openBoardView(group, boards) {
+  if (boards.length === 1) location.hash = boardRoute(group, boards[0]);
+  else if (boards.length) location.hash = `${classRoute(group)}/tableaux/${boards.map(board => board.id).join(',')}`;
+  else location.hash = classRoute(group);
 }
 
-function renderBoardDirectory(group, showMulti) {
-  const canOpenMultiple = group.boards.length > 1;
+function renderBoardDirectory(group) {
   content.innerHTML = `<section class="route">
     <a class="back-link" href="#classes">← Mes classes</a>
     <div class="route-head">
       <h1>${esc(group.name)}</h1>
-      <a href="${classRoute(group)}/eleves">Gérer les élèves</a>
+      <div class="class-nav-actions">
+        <a href="${classRoute(group)}/eleves">Gérer les élèves</a>
+        <button id="newBoard" class="primary" type="button">+ Nouveau tableau</button>
+      </div>
     </div>
-    <section class="multi-board-picker" aria-labelledby="multiBoardTitle">
-      <h2 id="multiBoardTitle">Multi-tableaux</h2>
-      ${canOpenMultiple ? `<form id="openBoards">
-        <p>Sélectionne 2 à 4 tableaux pour les afficher sur la même page.</p>
-        <div class="class-grid">${group.boards.map(board => `<label class="board-directory-card board-choice">
-          <input type="checkbox" name="boards" value="${esc(board.id)}" ${group.boards.length === 2 ? 'checked' : ''}>
-          <span>${esc(board.name)}</span>
-        </label>`).join('')}</div>
-        <button id="openSelected" class="primary">Ouvrir les tableaux ensemble</button>
-      </form>` : `<p>${group.boards.length === 1 ? 'Tu as un tableau dans cette classe. Crée le deuxième pour les ouvrir ensemble.' : 'Crée deux tableaux dans cette classe pour les ouvrir ensemble.'}</p>`}
-      <form id="createBoard" class="board-create">
-        <label for="newBoardName">Nom du nouveau tableau</label>
-        <div><input id="newBoardName" maxlength="80" placeholder="Ex. Badminton · séance 2" required>
-          <button type="submit" class="${canOpenMultiple ? '' : 'primary'}">${group.boards.length === 1 ? 'Créer et ouvrir les deux tableaux' : 'Créer un tableau'}</button></div>
-      </form>
-    </section>
-    <h2 class="single-board-title">Tableaux de la classe</h2>
-    <div class="class-grid">${group.boards.map(board => `<div class="board-directory-card">
+    ${group.boards.length ? `<div class="class-grid">${group.boards.map(board => `<div class="board-directory-card">
       <a href="${boardRoute(group, board)}">${esc(board.name)}</a>
-    </div>`).join('')}</div>
+      <button class="board-delete danger" type="button" data-delete-board="${esc(board.id)}"
+        aria-label="Supprimer ${esc(board.name)}" title="Supprimer le tableau">×</button>
+    </div>`).join('')}</div>` : '<p>Aucun tableau dans cette classe.</p>'}
+    <dialog id="newBoardDialog" aria-labelledby="newBoardTitle">
+      <h2 id="newBoardTitle">Nouveau tableau</h2>
+      <form id="createBoard">
+        <label for="newBoardName">Nom du tableau</label>
+        <input id="newBoardName" maxlength="80" placeholder="Ex. Badminton" required autofocus>
+        <div class="actions">
+          <button id="cancelNewBoard" type="button">Annuler</button>
+          <button class="primary" type="submit">Créer le tableau</button>
+        </div>
+      </form>
+    </dialog>
   </section>`;
+  const dialog = $('newBoardDialog');
   const input = $('newBoardName');
+  $('newBoard').onclick = () => dialog.showModal();
+  $('cancelNewBoard').onclick = () => dialog.close();
   $('createBoard').onsubmit = event => {
     event.preventDefault();
     const name = input.value.trim();
     if (!name) { input.focus(); return; }
     const board = createNamedBoard(group, name);
-    if (!board) return;
-    location.hash = !canOpenMultiple && group.boards.length === 2
-      ? multipleBoardRoute(group, group.boards.map(item => item.id))
-      : boardRoute(group, board);
+    if (board) openBoardView(group, [board]);
   };
-  const selection = $('openBoards');
-  if (!selection) {
-    if (showMulti) input.focus({preventScroll: true});
-    return;
+  for (const button of content.querySelectorAll('[data-delete-board]')) {
+    button.onclick = () => {
+      const previous = group.boards;
+      const board = previous.find(item => item.id === button.dataset.deleteBoard);
+      if (!confirm(`Supprimer définitivement « ${board.name} » et ses sauvegardes ?`)) return;
+      group.boards = previous.filter(item => item !== board);
+      if (save()) {
+        renderBoardDirectory(group);
+        $('newBoard').focus({preventScroll: true});
+      } else group.boards = previous;
+    };
   }
-  const checks = [...selection.querySelectorAll('input')];
-  function refreshSelection() {
-    const count = checks.filter(check => check.checked).length;
-    $('openSelected').disabled = count < 2;
-    checks.forEach(check => { check.disabled = count >= MAX_OPEN_BOARDS && !check.checked; });
-  }
-  refreshSelection();
-  selection.onchange = refreshSelection;
-  if (showMulti) (group.boards.length === 2 ? $('openSelected') : checks[0]).focus({preventScroll: true});
-  selection.onsubmit = event => {
-    event.preventDefault();
-    const selected = checks.filter(check => check.checked).map(check => check.value);
-    if (selected.length >= 2 && selected.length <= MAX_OPEN_BOARDS) location.hash = multipleBoardRoute(group, selected);
-  };
 }
 
 function renderOpenBoards(group, boards) {
   const students = [...group.students].sort((a, b) => a.name.localeCompare(b.name, 'fr'));
   const multiple = boards.length > 1;
   const canAddBoard = boards.length < MAX_OPEN_BOARDS;
+  const available = group.boards.filter(board => !boards.includes(board));
   content.innerHTML = `<div class="class-nav">
     <a href="${classRoute(group)}">← Tableaux de ${esc(group.name)}</a>
     <h1>${esc(multiple ? group.name : boards[0].name)}</h1>
     <div class="class-nav-actions">
       ${canAddBoard ? '<button id="addOpenBoard" class="primary" type="button">+ Ajouter un tableau</button>' : '<span class="muted">4 tableaux ouverts</span>'}
-      ${group.boards.length > 1 ? `<a href="${classRoute(group)}/multi">Choisir les tableaux</a>` : ''}
+      ${canAddBoard && available.length ? `<select id="openSavedBoard" aria-label="Ouvrir un tableau enregistré">
+        <option value="">Ouvrir un tableau enregistré</option>
+        ${available.map(board => `<option value="${esc(board.id)}">${esc(board.name)}</option>`).join('')}
+      </select>` : ''}
       <a href="${classRoute(group)}/eleves">Gérer les élèves</a>
     </div>
   </div><div class="open-boards${multiple ? ' open-boards-multiple' : ''}"></div>`;
@@ -156,7 +153,14 @@ function renderOpenBoards(group, boards) {
       const board = createNamedBoard(group, `Tableau ${number}`);
       if (!board) return;
       event.currentTarget.disabled = true;
-      location.hash = multipleBoardRoute(group, [...boards, board].map(item => item.id));
+      openBoardView(group, [...boards, board]);
+    };
+  }
+  const savedPicker = $('openSavedBoard');
+  if (savedPicker) {
+    savedPicker.onchange = () => {
+      const board = available.find(item => item.id === savedPicker.value);
+      if (board) openBoardView(group, [...boards, board]);
     };
   }
   const grid = content.querySelector('.open-boards');
@@ -164,7 +168,8 @@ function renderOpenBoards(group, boards) {
     const container = document.createElement('div');
     grid.append(container);
     renderClassBoard(board, students, group.id, container, multiple,
-      (name, layout) => createNamedBoard(group, name, layout));
+      (name, layout) => createNamedBoard(group, name, layout),
+      () => openBoardView(group, boards.filter(item => item !== board)));
   }
 }
 
@@ -301,9 +306,9 @@ function render() {
     } else {
       const ids = subpage === 'tableaux' ? (boardId || '').split(',').slice(0, MAX_OPEN_BOARDS)
         : subpage === 'tableau' ? [boardId] : [];
-      const boards = group.boards.filter(board => ids.includes(board.id));
+      const boards = [...new Set(ids)].map(id => group.boards.find(board => board.id === id)).filter(Boolean);
       if (boards.length) renderOpenBoards(group, boards);
-      else renderBoardDirectory(group, subpage === 'multi');
+      else renderBoardDirectory(group);
     }
   } else {
     renderMenu();
