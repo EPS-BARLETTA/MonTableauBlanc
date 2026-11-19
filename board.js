@@ -14,8 +14,12 @@ const boardClamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const boardNumber = (value, fallback) => Number.isFinite(value) ? boardClamp(value, 0, 100) : fallback;
 const BOARD_INK_POINTS = 500;
 const BOARD_INK_STROKES = 100;
-const BOARD_SCALE_ROWS = 20;
+const BOARD_SCALE_MAX = 20;
+const BOARD_SCALE_ROWS = (BOARD_SCALE_MAX - 1) * 2 + 1;
 const BOARD_SCALE_STEP = 100 / BOARD_SCALE_ROWS;
+// Positions already saved on the integer scale use 2.5% for 20 and 97.5% for 1.
+const BOARD_SCALE_STORED_STEP = 100 / BOARD_SCALE_MAX / 2;
+const boardScaleLabel = index => String(BOARD_SCALE_MAX - index / 2).replace('.', ',');
 const BOARD_REFERENCE_LIMIT = 15 * 1024 * 1024;
 const BOARD_REFERENCE_TYPES = ['application/pdf', 'image/png', 'image/jpeg'];
 
@@ -268,7 +272,7 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
     surface.classList.toggle('board-ladder', ladder);
     surface.style.setProperty('--court-rows', Math.ceil(count / 2));
     if (isScale()) {
-      floor.innerHTML = Array.from({length: BOARD_SCALE_ROWS}, (_, i) => `<div class="board-tick"><b>${BOARD_SCALE_ROWS - i}</b></div>`).join('');
+      floor.innerHTML = Array.from({length: BOARD_SCALE_ROWS}, (_, i) => `<div class="board-tick"><b>${boardScaleLabel(i)}</b></div>`).join('');
     } else if (sport) {
       floor.innerHTML = Array.from({length: count}, (_, i) => `<div class="board-court"><i></i><i></i><i></i><i></i>${ladder ? `<b>Terrain ${i + 1}</b>` : ''}</div>`).join('');
     } else {
@@ -454,9 +458,17 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
   }
 
   function paint(element, position) {
-    const visible = point(element, position.x, position.y);
-    element.style.left = `${visible.x}%`;
-    element.style.top = `${visible.y}%`;
+    let y = position.y;
+    if (isScale() && element.dataset.studentId) {
+      const row = boardClamp(Math.round(y / BOARD_SCALE_STORED_STEP - 1), 0, BOARD_SCALE_ROWS - 1);
+      y = (row + .5) * BOARD_SCALE_STEP;
+    }
+    paintPosition(element, point(element, position.x, y));
+  }
+
+  function paintPosition(element, position) {
+    element.style.left = `${position.x}%`;
+    element.style.top = `${position.y}%`;
   }
 
   function paintItems() {
@@ -577,6 +589,10 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
       }};
       cards.set(student.id, record);
       makeDraggable(element, record.position, next => {
+        if (isScale()) {
+          const row = Math.floor(next.y / BOARD_SCALE_STEP);
+          next = {...next, y: (row + 1) * BOARD_SCALE_STORED_STEP};
+        }
         const previous = layout.positions[student.id];
         layout.positions[student.id] = next;
         if (writeBoard()) record.position = next;
@@ -782,7 +798,7 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
     const dx = g.clientX - g.x + g.left - box.left;
     const dy = g.clientY - g.y + g.top - box.top;
     g.next = point(g.element, g.origin.x + dx * 100 / surface.clientWidth, g.origin.y + dy * 100 / surface.clientHeight);
-    paint(g.element, g.next);
+    paintPosition(g.element, g.next);
     if (g.element.dataset.studentId) paintStudentNotes(g.element.dataset.studentId, g.element);
     if ('boardNote' in g.element.dataset) highlightNoteTarget(noteDropTarget(g.clientX, g.clientY));
   }
