@@ -14,6 +14,8 @@ const boardClamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const boardNumber = (value, fallback) => Number.isFinite(value) ? boardClamp(value, 0, 100) : fallback;
 const BOARD_INK_POINTS = 500;
 const BOARD_INK_STROKES = 100;
+const BOARD_SCALE_ROWS = 20;
+const BOARD_SCALE_STEP = 100 / BOARD_SCALE_ROWS;
 const BOARD_REFERENCE_LIMIT = 15 * 1024 * 1024;
 const BOARD_REFERENCE_TYPES = ['application/pdf', 'image/png', 'image/jpeg'];
 
@@ -238,6 +240,7 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
   const markElements = new Map();
   const portraitDialog = $('boardPortraitDialog');
   const isLadder = () => ['badminton', 'pickleball'].includes(layout.background);
+  const isScale = () => layout.background === 'scale';
   const hasCourts = () => !['blank', 'scale'].includes(layout.background);
   const numberOfCourts = () => isLadder() ? layout.ladderCourts : layout.courts;
   let gesture, pendingTap, editing, highlightedStudent;
@@ -259,12 +262,13 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
     $('boardCourtCount').replaceChildren(...Array.from({length: ladder ? 12 : 4}, (_, index) => new Option(index + 1, index + 1)));
     $('boardCourtCount').value = count;
     surface.dataset.background = layout.background;
+    container.classList.toggle('board-with-scale', isScale());
     floor.className = `board-floor board-${layout.background}`;
     floor.dataset.count = count;
     surface.classList.toggle('board-ladder', ladder);
     surface.style.setProperty('--court-rows', Math.ceil(count / 2));
-    if (layout.background === 'scale') {
-      floor.innerHTML = Array.from({length: 20}, (_, i) => `<div class="board-tick"><b>${20 - i}</b></div>`).join('');
+    if (isScale()) {
+      floor.innerHTML = Array.from({length: BOARD_SCALE_ROWS}, (_, i) => `<div class="board-tick"><b>${BOARD_SCALE_ROWS - i}</b></div>`).join('');
     } else if (sport) {
       floor.innerHTML = Array.from({length: count}, (_, i) => `<div class="board-court"><i></i><i></i><i></i><i></i>${ladder ? `<b>Terrain ${i + 1}</b>` : ''}</div>`).join('');
     } else {
@@ -440,6 +444,11 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
 
   function point(element, x, y) {
     const insetX = Math.min(49, element.offsetWidth * 50 / surface.clientWidth);
+    if (isScale() && element.dataset.studentId) {
+      const row = boardClamp(Math.floor(y / BOARD_SCALE_STEP), 0, BOARD_SCALE_ROWS - 1);
+      const gutter = 100 * (floor.firstElementChild?.firstElementChild?.offsetWidth || 0) / surface.clientWidth;
+      return {x: boardClamp(x, Math.min(100 - insetX, gutter + insetX), 100 - insetX), y: (row + .5) * BOARD_SCALE_STEP};
+    }
     const insetY = Math.min(49, element.offsetHeight * 50 / surface.clientHeight);
     return {x: boardClamp(x, insetX, 100 - insetX), y: boardClamp(y, insetY, 100 - insetY)};
   }
@@ -528,7 +537,8 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
       if (!delta) return;
       event.preventDefault();
       const step = event.shiftKey ? 8 : 2;
-      const next = point(element, parseFloat(element.style.left) + delta[0] * step, parseFloat(element.style.top) + delta[1] * step);
+      const verticalStep = isScale() && element.dataset.studentId ? (event.shiftKey ? 3 : 1) * BOARD_SCALE_STEP : step;
+      const next = point(element, parseFloat(element.style.left) + delta[0] * step, parseFloat(element.style.top) + delta[1] * verticalStep);
       persistPosition(next);
     });
     paint(element, position);
@@ -778,7 +788,7 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
   }
 
   function scrollDuringDrag(g) {
-    if (gesture !== g || !isLadder()) return;
+    if (gesture !== g || !(isLadder() || isScale())) return;
     const viewport = panel.classList.contains('board-expanded') ? workspace.getBoundingClientRect() : {top: 0, bottom: window.innerHeight};
     const scrollArea = panel.classList.contains('board-expanded') ? workspace : window;
     const margin = 68;
@@ -802,7 +812,7 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
       g.clientY = event.clientY;
       g.element.classList.add('board-dragging');
       paintDragged(g);
-      if (firstMove && isLadder()) g.frame = requestAnimationFrame(() => scrollDuringDrag(g));
+      if (firstMove && (isLadder() || isScale())) g.frame = requestAnimationFrame(() => scrollDuringDrag(g));
     }
   });
   surface.addEventListener('pointerup', event => {
@@ -898,6 +908,7 @@ function renderClassBoard(group, students, classId, container, multiple, saveAsN
     layout.background = event.target.value;
     if (!writeBoard()) event.target.value = layout.background = previous;
     paintFloor();
+    paintItems();
   };
   $('boardCourtCount').onchange = event => {
     const key = isLadder() ? 'ladderCourts' : 'courts';

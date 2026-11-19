@@ -80,10 +80,10 @@
 .board-racket .board-court i:nth-child(-n+2), .board-tennis .board-court i:nth-child(-n+2) { top: 0; bottom: 0; left: 30%; border-left: 2px solid; }
 .board-racket .board-court i:nth-child(2), .board-tennis .board-court i:nth-child(2) { left: 70%; }
 .board-racket .board-court i:nth-child(3), .board-tennis .board-court i:nth-child(3) { top: 50%; left: 30%; right: 30%; border-top: 2px solid; }
-.board-scale { display: grid; grid-template-rows: repeat(20, minmax(0, 1fr)); padding: 22px 0; }
+.board-scale { display: grid; grid-template-rows: repeat(20, minmax(0, 1fr)); }
 .board-tick { display: flex; align-items: center; border-bottom: 1px solid #dbe5ef; background: #f6f9fd; }
 .board-tick:nth-child(even) { background: #eaf1f9; }
-.board-tick b { padding-inline: 5px; color: #385473; font-size: 12px; }
+.board-tick b { flex: 0 0 36px; text-align: center; color: #385473; font-size: 13px; }
 .board-movable {
   position: absolute;
   transform: translate(-50%, -50%);
@@ -190,6 +190,26 @@
   .open-boards-multiple .class-board:not(.board-expanded) .board-student img,
   .open-boards-multiple .class-board:not(.board-expanded) .board-initials { width: 26px; height: 29px; }
   .open-boards-multiple .class-board:not(.board-expanded) .board-student > span:last-child { font-size: 10px; }
+}
+
+.open-boards-multiple > .board-with-scale { grid-column: 1 / -1; }
+.class-board .board-surface[data-background="scale"] { height: 1360px; min-height: 1360px; }
+.class-board .board-surface[data-background="scale"] .board-student {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: min(132px, 55%);
+  height: 52px;
+  min-height: 0;
+  padding: 3px 6px;
+}
+.class-board .board-surface[data-background="scale"] .board-student img,
+.class-board .board-surface[data-background="scale"] .board-initials { width: 34px; height: 40px; flex: none; }
+.class-board .board-surface[data-background="scale"] .board-student > span:last-child {
+  min-width: 0;
+  white-space: nowrap;
+  text-align: left;
+  font-size: 12px;
 }
 @media (max-width: 550px) {
   .board-workspace { grid-template-columns: minmax(0, 1fr) 50px; gap: 4px; }
